@@ -1,20 +1,28 @@
 import sys, os, requests, threading, time, json, webbrowser
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+
+# --- JARVIS VOICE CHECK (FAIL-SAFE) ---
+VOICE_READY = False
+try:
+    import speech_recognition as sr
+    import pyaudio
+    VOICE_READY = True
+except ImportError:
+    sr = None
+
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLineEdit, QPushButton, QScrollArea, 
                              QLabel, QGridLayout, QFrame, QRadioButton, QTextEdit, 
                              QSystemTrayIcon, QMenu, QAction, QStyle, QActionGroup)
-from PyQt5.QtCore import Qt, pyqtSignal, QObject
-from PyQt5.QtGui import QPixmap, QIcon
+from PyQt5.QtCore import Qt, pyqtSignal, QObject, QTimer
+from PyQt5.QtGui import QPixmap, QIcon, QFont
 
-# --- STARK PROTOCOL: THE BRAIN V11.0 ---
 class SignalHandler(QObject):
     item_signal = pyqtSignal(dict, QPixmap, int, str, int)
     log_signal = pyqtSignal(str); clear_signal = pyqtSignal()
 
 STARK_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJlYjhlNjk5OGE0MGVhYmY0YmZjODg0NGI1YWJmNjM0OCIsIm5iZiI6MTc3MDk1NDE2NC40MjQsInN1YiI6IjY5OGU5ZGI0MTYxYmU0NzBjODJmMzBhYSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7vRC52l-A-wHieUWk65LelT8dLFYMD70kxas_p5qWu4"
-JASON_FILE = "status_cache.json"
 LOGO_PATH = "logo.png"
 
 STYLESHEET = """
@@ -23,31 +31,53 @@ QFrame#Sidebar { background-color: #0f001a; border-right: 2px solid #ff0000; }
 QLabel { color: #ff0000; font-family: 'Segoe UI'; font-weight: bold; }
 QScrollArea { background-color: #1a0033; border: none; }
 QWidget#Gallery { background-color: #2e004b; padding-right: 10px; }
-QFrame#MovieCard { background-color: #1a0000; border-radius: 10px; border: 2px solid #ff0000; padding: 5px; margin: 2px; }
-QLineEdit { background-color: #111; border: 1px solid #ff0000; border-radius: 5px; color: white; padding: 12px; }
+
+QFrame#MovieCard { 
+    background-color: #1a0000; 
+    border-radius: 10px; 
+    border: 2px solid #ff0000; 
+    padding: 5px; 
+}
+QFrame#MovieCard:hover { border: 2px solid #00ff00; background-color: #001a00; }
+
+QLineEdit { background-color: #111; border: 2px solid #ff0000; border-radius: 8px; color: #00ff00; padding: 12px; font-family: 'Consolas'; }
 QPushButton { background-color: #111; color: #ff3333; border: 1px solid #aa0000; border-radius: 8px; padding: 8px; font-weight: bold; }
 QPushButton:hover { border: 1px solid #00ff00; color: #00ff00; }
-QPushButton#WatchBtn { background-color: #006600; color: #00ff00; border: 1px solid #00ff00; outline: none; }
+QPushButton#VoiceBtn { background-color: #330033; color: #ff00ff; border: 1px solid #ff00ff; }
 QTextEdit#Console { background-color: #000; color: #00ff00; border: 1px solid #ff0000; font-family: 'Consolas'; font-size: 11px; }
 * { outline: none; }
 """
 
+class MovieCard(QFrame):
+    def __init__(self, item, pix, mtype, parent_app):
+        super().__init__()
+        self.setObjectName("MovieCard"); self.setFixedSize(170, 300)
+        self.item = item; self.parent_app = parent_app; self.mtype = mtype
+        layout = QVBoxLayout(self)
+        
+        self.poster = QLabel(); self.poster.setPixmap(pix); layout.addWidget(self.poster, alignment=Qt.AlignCenter)
+        title_str = (item.get('title') or item.get('name'))[:18]
+        self.title = QLabel(title_str); self.title.setStyleSheet("color: white; font-size: 10px;"); layout.addWidget(self.title, alignment=Qt.AlignCenter)
+        
+        self.btn = QPushButton("WATCH"); self.btn.clicked.connect(lambda: parent_app.launch_movie(item['id'], mtype))
+        layout.addWidget(self.btn)
+
+    def enterEvent(self, event):
+        # Intel Protocol: Show metadata on hover
+        rating = self.item.get('vote_average', 'N/A')
+        date = self.item.get('release_date') or self.item.get('first_air_date') or 'Unknown'
+        overview = self.item.get('overview', 'No data available.')[:150] + "..."
+        msg = f"🔍 INTEL: {self.title.text()}\n⭐ Rating: {rating} | 📅 {date}\n📝 {overview}"
+        self.parent_app.signals.log_signal.emit(msg)
+
 class MoviePlusPro(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Stark Cinema - The Brain V11.0")
+        self.setWindowTitle("Stark Cinema - Vision V12.0")
         self.resize(1500, 920); self.setStyleSheet(STYLESHEET)
         
-        # --- THE ARSENAL (18 SOURCES) ---
         self.current_source = "Alpha"
-        self.sources = {
-            "Alpha": "vidsrc.me", "Bravo": "vidsrc.to", "Gamma": "vidsrc.cc",
-            "Delta": "embed.su", "Epsilon": "vidsrc.xyz", "Zeta": "vidsrc.pro",
-            "Eta": "vidsrc.icu", "Theta": "autoembed.to", "Iota": "vidlink.pro",
-            "Kappa": "2embed.cc", "Lambda": "vidsrc.in", "Mu": "superembed.me",
-            "Nu": "movieapi.club", "Xi": "db-gdrive", "Omicron": "vidsrcme.ru",
-            "Pi": "vidplay.online", "Rho": "moviesapi.club", "Sigma": "vidsrc.net"
-        }
+        self.sources = {"Alpha": "vidsrc.me", "Bravo": "vidsrc.to", "Gamma": "vidsrc.cc", "Delta": "embed.su"}
         
         self.shown_ids = set(); self.task_counter = 0; self.current_mode = "movie"
         self.executor = ThreadPoolExecutor(max_workers=5)
@@ -57,72 +87,70 @@ class MoviePlusPro(QMainWindow):
         self.signals.clear_signal.connect(self.clear_gallery)
         
         self.setup_tray(); self.init_ui()
-
-    def setup_tray(self):
-        self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        self.tray_menu = QMenu()
-        self.arsenal_menu = self.tray_menu.addMenu("📁 SOURCE ARSENAL")
-        self.source_group = QActionGroup(self)
-        for s_name in self.sources.keys():
-            act = QAction(f"Source {s_name}", self, checkable=True)
-            if s_name == self.current_source: act.setChecked(True)
-            act.triggered.connect(lambda ch, name=s_name: self.set_source(name))
-            self.arsenal_menu.addAction(act); self.source_group.addAction(act)
-        self.tray_menu.addAction("👁️ SHOW GALLERY").triggered.connect(self.show_normal)
-        self.tray_menu.addAction("❌ EXIT").triggered.connect(sys.exit)
-        self.tray_icon.setContextMenu(self.tray_menu); self.tray_icon.activated.connect(self.on_tray_activated); self.tray_icon.show()
-
-    def set_source(self, name):
-        self.current_source = name
-        self.signals.log_signal.emit(f"🧠 Intelligence Update: Switched to {name}")
-        if hasattr(self, 'current_mid') and self.current_mid: 
-            self.launch_movie(self.current_mid, self.current_mtype)
-
-    def on_tray_activated(self, reason):
-        if reason == QSystemTrayIcon.Trigger: self.show_normal()
+        self.signals.log_signal.emit("⚡ Vision Intelligence Systems: ONLINE")
 
     def init_ui(self):
         central = QWidget(); self.setCentralWidget(central); layout = QHBoxLayout(central); layout.setContentsMargins(0, 0, 0, 0)
-        self.sidebar = QFrame(); self.sidebar.setObjectName("Sidebar"); self.sidebar.setFixedWidth(260); side_layout = QVBoxLayout(self.sidebar)
-        if os.path.exists(LOGO_PATH):
-            self.logo = QLabel(); self.logo.setPixmap(QPixmap(LOGO_PATH).scaled(220, 120, Qt.KeepAspectRatio)); side_layout.addWidget(self.logo, alignment=Qt.AlignCenter)
+        self.sidebar = QFrame(); self.sidebar.setObjectName("Sidebar"); self.sidebar.setFixedWidth(280); side_layout = QVBoxLayout(self.sidebar)
+        
+        side_layout.addWidget(QLabel(" COMMAND CENTER "))
         btn_trend = QPushButton("🔥 TRENDING"); btn_trend.clicked.connect(self.run_trending); side_layout.addWidget(btn_trend)
-        self.console = QTextEdit(); self.console.setObjectName("Console"); self.console.setReadOnly(True); self.console.setFixedHeight(150); side_layout.addStretch(); side_layout.addWidget(self.console); layout.addWidget(self.sidebar)
-        content = QWidget(); c_layout = QVBoxLayout(content); self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Search Intelligence..."); self.search_bar.returnPressed.connect(self.run_search); c_layout.addWidget(self.search_bar)
-        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.container = QWidget(); self.container.setObjectName("Gallery"); self.grid = QGridLayout(self.container); self.grid.setSpacing(8); self.scroll.setWidget(self.container); c_layout.addWidget(self.scroll); layout.addWidget(content); self.run_trending()
+        
+        self.v_btn = QPushButton("🎙️ VOICE COMMAND"); self.v_btn.setObjectName("VoiceBtn")
+        self.v_btn.clicked.connect(self.start_voice_thread); side_layout.addWidget(self.v_btn)
+        
+        self.console = QTextEdit(); self.console.setObjectName("Console"); self.console.setReadOnly(True); self.console.setFixedHeight(300); side_layout.addStretch(); side_layout.addWidget(self.console); layout.addWidget(self.sidebar)
+        
+        content = QWidget(); c_layout = QVBoxLayout(content)
+        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Type 'play [movie]' or search here..."); self.search_bar.returnPressed.connect(self.process_command); c_layout.addWidget(self.search_bar)
+        
+        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.container = QWidget(); self.container.setObjectName("Gallery"); self.grid = QGridLayout(self.container); self.grid.setSpacing(10); self.scroll.setWidget(self.container); c_layout.addWidget(self.scroll); layout.addWidget(content); self.run_trending()
+
+    def process_command(self):
+        cmd = self.search_bar.text().lower().strip()
+        if cmd.startswith("play "):
+            movie = cmd.replace("play ", "")
+            self.signals.log_signal.emit(f"🚀 Auto-Pilot: Hunting for '{movie}'...")
+            self.auto_pilot = True; self.run_search(movie)
+        else:
+            self.run_search(cmd)
 
     def launch_movie(self, mid, mtype):
-        self.current_mid = mid; self.current_mtype = mtype
-        urls = {
-            "Alpha": f"https://vidsrc.me/embed/{mtype}?tmdb={mid}",
-            "Bravo": f"https://vidsrc.to/embed/{mtype}/{mid}",
-            "Gamma": f"https://vidsrc.cc/v2/embed/{mtype}/{mid}",
-            "Delta": f"https://embed.su/embed/{mtype}/{mid}",
-            "Epsilon": f"https://vidsrc.xyz/embed/{mtype}/{mid}",
-            "Zeta": f"https://vidsrc.pro/embed/{mtype}/{mid}",
-            "Eta": f"https://vidsrc.icu/embed/{mtype}/{mid}",
-            "Theta": f"https://autoembed.to/{mtype}/tmdb/{mid}",
-            "Iota": f"https://vidlink.pro/embed/{mtype}/{mid}",
-            "Kappa": f"https://www.2embed.cc/embed/{mid}",
-            "Lambda": f"https://vidsrc.in/embed/{mtype}/{mid}",
-            "Mu": f"https://superembed.me/{mtype}/{mid}",
-            "Nu": f"https://movieapi.club/{mtype}/{mid}",
-            "Xi": f"https://databasegdriveplayer.co/player.php?type={mtype}&tmdb={mid}",
-            "Omicron": f"https://vidsrcme.ru/embed/{mtype}?tmdb={mid}",
-            "Pi": f"https://vidplay.online/embed/{mtype}/{mid}",
-            "Rho": f"https://moviesapi.club/{mtype}/{mid}",
-            "Sigma": f"https://vidsrc.net/embed/{mtype}/{mid}"
-        }
-        self.signals.log_signal.emit(f"🎬 Intelligence: Launching via {self.current_source}...")
-        webbrowser.open(urls.get(self.current_source, urls["Alpha"]))
+        self.signals.log_signal.emit(f"🎬 Launching {mtype} ID: {mid} via {self.current_source}...")
+        url = f"https://vidsrc.me/embed/{mtype}?tmdb={mid}"
+        webbrowser.open(url)
 
-    def show_normal(self): self.show(); self.raise_(); self.activateWindow()
-    def clear_gallery(self): 
-        self.shown_ids.clear()
-        while self.grid.count():
-            w = self.grid.takeAt(0).widget()
-            if w: w.deleteLater()
+    def add_item_to_ui(self, item, pix, rank, mtype, tid):
+        if tid != self.task_counter: return
+        card = MovieCard(item, pix, mtype, self)
+        self.grid.addWidget(card, (rank-1)//5, (rank-1)%5, alignment=Qt.AlignCenter)
+        
+        if hasattr(self, 'auto_pilot') and self.auto_pilot and rank == 1:
+            self.auto_pilot = False
+            self.launch_movie(item['id'], mtype)
+
+    def start_voice_thread(self):
+        if not VOICE_READY:
+            self.signals.log_signal.emit("❌ Hardware Error: PyAudio missing. Use Command Line instead.")
+            return
+        threading.Thread(target=self.voice_worker, daemon=True).start()
+
+    def voice_worker(self):
+        r = sr.Recognizer()
+        with sr.Microphone() as source:
+            self.signals.log_signal.emit("🎙️ Listening...")
+            try:
+                audio = r.listen(source, timeout=5)
+                query = r.recognize_google(audio)
+                self.signals.log_signal.emit(f"🗣️ Found: '{query}'")
+                self.search_bar.setText(f"play {query}"); self.process_command()
+            except Exception as e:
+                self.signals.log_signal.emit(f"⚠️ Voice Error: {str(e)}")
+
+    def run_trending(self): self.start_thread(f"https://api.themoviedb.org/3/trending/{self.current_mode}/week")
+    def run_search(self, q=None):
+        query = q or self.search_bar.text().strip()
+        if query: self.start_thread(f"https://api.themoviedb.org/3/search/multi?query={query}")
 
     def start_thread(self, url):
         self.task_counter += 1; self.signals.clear_signal.emit()
@@ -131,44 +159,32 @@ class MoviePlusPro(QMainWindow):
     def fetch_worker(self, url, t_id):
         try:
             h = {"Authorization": f"Bearer {STARK_TOKEN}"}
-            count = 1; page = 1
-            while count <= 60 and page <= 10:
-                p_url = f"{url}{'&' if '?' in url else '?'}page={page}"
-                res = requests.get(p_url, headers=h).json().get('results', [])
-                for item in res:
-                    if t_id != self.task_counter: return
-                    if str(item['id']) in self.shown_ids: continue
-                    self.shown_ids.add(str(item['id']))
-                    self.executor.submit(self.img_worker, item, count, self.current_mode, t_id)
-                    count += 1
-                    time.sleep(0.25) # Conveyor Belt Protocol
-                page += 1
+            res = requests.get(url, headers=h).json().get('results', [])
+            for i, item in enumerate(res[:60]):
+                if t_id != self.task_counter: return
+                self.executor.submit(self.img_worker, item, i+1, self.current_mode, t_id)
+                time.sleep(0.25)
         except: pass
 
     def img_worker(self, item, rank, mtype, tid):
-        if tid != self.task_counter: return
         try:
             url = f"https://image.tmdb.org/t/p/w300{item['poster_path']}"
-            data = requests.get(url, timeout=5).content; pix = QPixmap(); pix.loadFromData(data)
-            self.signals.item_signal.emit(item, pix.scaled(155, 230, Qt.KeepAspectRatio, Qt.SmoothTransformation), rank, mtype, tid)
+            pix = QPixmap(); pix.loadFromData(requests.get(url).content)
+            self.signals.item_signal.emit(item, pix.scaled(155, 230, Qt.KeepAspectRatio), rank, mtype, tid)
         except: pass
 
-    def add_item_to_ui(self, item, pix, rank, mtype, tid):
-        if tid != self.task_counter: return
-        f = QFrame(); f.setObjectName("MovieCard"); l = QVBoxLayout(f)
-        p = QLabel(); p.setPixmap(pix); l.addWidget(p, alignment=Qt.AlignCenter)
-        title = (item.get('title') or item.get('name'))[:20]
-        l.addWidget(QLabel(title), alignment=Qt.AlignCenter)
-        b = QPushButton("WATCH"); b.setObjectName("WatchBtn")
-        b.clicked.connect(lambda: self.launch_movie(item['id'], mtype))
-        l.addWidget(b); self.grid.addWidget(f, (rank-1)//5, (rank-1)%5, alignment=Qt.AlignCenter)
+    def setup_tray(self):
+        self.tray_icon = QSystemTrayIcon(self); self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        menu = QMenu(); menu.addAction("👁️ SHOW").triggered.connect(lambda: self.show_normal())
+        menu.addAction("❌ EXIT").triggered.connect(sys.exit)
+        self.tray_icon.setContextMenu(menu); self.tray_icon.show()
 
-    def run_trending(self): self.start_thread(f"https://api.themoviedb.org/3/trending/{self.current_mode}/week")
-    def run_search(self):
-        q = self.search_bar.text().strip()
-        if q: self.start_thread(f"https://api.themoviedb.org/3/search/multi?query={q}")
+    def show_normal(self): self.show(); self.raise_(); self.activateWindow()
+    def clear_gallery(self): 
+        while self.grid.count():
+            w = self.grid.takeAt(0).widget()
+            if w: w.deleteLater()
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(False)
+    app = QApplication(sys.argv); app.setQuitOnLastWindowClosed(False)
     win = MoviePlusPro(); win.show(); sys.exit(app.exec_())
