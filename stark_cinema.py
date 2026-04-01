@@ -160,4 +160,4 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("System Settings")
         self.setFixedSize(550, 400)
-        self.setStyleSheet(STY
+        self.setStyleSheet(STY)
