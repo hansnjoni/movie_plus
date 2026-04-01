@@ -1,4 +1,6 @@
 import sys, os, requests, threading, time, json, webbrowser
+from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLineEdit, QPushButton, QScrollArea, 
                              QLabel, QGridLayout, QFrame, QRadioButton, QTextEdit, 
@@ -6,95 +8,182 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
 from PyQt5.QtGui import QPixmap, QIcon
 
-# --- PREVIOUS SPECS REMAIN (STARK_TOKEN, JASON_FILE, etc.) ---
+# --- PROTOCOL: SIGNAL HANDLER ---
+class SignalHandler(QObject):
+    item_signal = pyqtSignal(dict, QPixmap, int, str, int)
+    log_signal = pyqtSignal(str); clear_signal = pyqtSignal()
+
+# --- MASTER SPECS ---
 STARK_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJlYjhlNjk5OGE0MGVhYmY0YmZjODg0NGI1YWJmNjM0OCIsIm5iZiI6MTc3MDk1NDE2NC40MjQsInN1YiI6IjY5OGU5ZGI0MTYxYmU0NzBjODJmMzBhYSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7vRC52l-A-wHieUWk65LelT8dLFYMD70kxas_p5qWu4"
 JASON_FILE = "status_cache.json"
+SETTINGS_FILE = "settings.json"
+LOGO_PATH = "logo.png"
+
+STYLESHEET = """
+QMainWindow { background-color: #050000; }
+QFrame#Sidebar { background-color: #0a0000; border-right: 2px solid #ff0000; }
+QLabel { color: #ff0000; font-family: 'Segoe UI'; font-weight: bold; }
+QFrame#MovieCard { background-color: #3a0000; border-radius: 10px; border: 2px solid #ff0000; padding: 5px; margin: 2px; }
+QLineEdit { background-color: #111; border: 1px solid #ff0000; border-radius: 5px; color: white; padding: 12px; }
+QPushButton { background-color: #111; color: #ff3333; border: 1px solid #aa0000; border-radius: 8px; padding: 8px; font-weight: bold; }
+QPushButton:hover { border: 1px solid #00ff00; color: #00ff00; }
+QPushButton#WatchBtn { background-color: #006600; color: #00ff00; border: 1px solid #00ff00; }
+QRadioButton { color: #ff0000; font-weight: bold; }
+QTextEdit#Console { background-color: #000; color: #00ff00; border: 1px solid #ff0000; font-family: 'Consolas'; font-size: 11px; }
+"""
+
+def get_jason():
+    if os.path.exists(JASON_FILE):
+        try:
+            with open(JASON_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+        except: return {}
+    return {}
+
+def save_to_jason(m_id, status):
+    mem = get_jason()
+    mem[str(m_id)] = {"status": status, "last_checked": str(datetime.now().date())}
+    with open(JASON_FILE, 'w', encoding='utf-8') as f: json.dump(mem, f)
 
 class MoviePlusPro(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Stark Cinema - Command Center v7.8")
-        self.resize(1550, 950)
+        self.setWindowTitle("Stark Cinema - Verified V8.0")
+        self.resize(1500, 920); self.setStyleSheet(STYLESHEET)
         
-        # Track State
-        self.current_mid = None
-        self.current_mtype = None
-        self.current_source = "Alpha"
+        self.settings = {"token": STARK_TOKEN, "timeout": 1.2}
+        self.current_mid = None; self.current_mtype = None; self.current_source = "Alpha"
+        self.shown_ids = set(); self.task_counter = 0; self.current_mode = "movie"
+        self.executor = ThreadPoolExecutor(max_workers=5)
+        
+        self.signals = SignalHandler()
+        self.signals.item_signal.connect(self.add_item_to_ui)
+        self.signals.log_signal.connect(lambda m: self.console.append(f"[{time.strftime('%H:%M:%S')}] {m}"))
+        self.signals.clear_signal.connect(self.clear_gallery)
+        
+        self.setup_tray()
+        self.init_ui()
 
-        # 1. SETUP ENHANCED SYSTEM TRAY
+    def setup_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(self.style().standardIcon(60)) # Uses a default System Icon
-            
+        icon = QIcon(LOGO_PATH) if os.path.exists(LOGO_PATH) else self.style().standardIcon(60)
+        self.tray_icon.setIcon(icon)
         self.tray_menu = QMenu()
-        
-        # SOURCE SWITCHER
         self.switch_action = QAction("⚡ SWITCH SOURCE (ALPHA -> BRAVO)", self)
         self.switch_action.triggered.connect(self.toggle_source_from_tray)
         self.tray_menu.addAction(self.switch_action)
-
-        # COPY LINK
-        self.copy_action = QAction("📋 COPY DIRECT STREAM LINK", self)
-        self.copy_action.triggered.connect(self.copy_link_to_clipboard)
-        self.tray_menu.addAction(self.copy_action)
-
-        self.tray_menu.addSeparator()
-
-        # JASON MEMORY CONTROL
-        self.cache_action = QAction("🗑️ JASON: WIPE MEMORY (CACHE RESET)", self)
-        self.cache_action.triggered.connect(self.reset_jason_cache)
-        self.tray_menu.addAction(self.cache_action)
-
-        # QUICK GENRE SUB-MENU
-        self.genre_menu = self.tray_menu.addMenu("📁 QUICK LAUNCH GENRE")
-        for g_name, g_id in [("Action", 28), ("Horror", 27), ("Comedy", 35), ("True Crime", "80,99")]:
-            action = QAction(g_name, self)
-            action.triggered.connect(lambda ch, idx=g_id: self.run_genre(idx))
-            self.genre_menu.addAction(action)
-
-        self.tray_menu.addSeparator()
-        
-        # SHOW/HIDE UI
-        self.view_action = QAction("👁️ SHOW/HIDE MAIN CONSOLE", self)
-        self.view_action.triggered.connect(self.toggle_ui_visibility)
-        self.tray_menu.addAction(self.view_action)
-
-        self.exit_action = QAction("❌ EXIT SYSTEM", self)
-        self.exit_action.triggered.connect(sys.exit)
-        self.tray_menu.addAction(self.exit_action)
-        
+        self.tray_menu.addAction("👁️ SHOW WINDOW").triggered.connect(self.show_normal)
+        self.tray_menu.addAction("❌ EXIT").triggered.connect(sys.exit)
         self.tray_icon.setContextMenu(self.tray_menu)
         self.tray_icon.show()
+
+    def init_ui(self):
+        central = QWidget(); self.setCentralWidget(central); layout = QHBoxLayout(central)
+        self.sidebar = QFrame(); self.sidebar.setObjectName("Sidebar"); self.sidebar.setFixedWidth(260)
+        side_layout = QVBoxLayout(self.sidebar)
         
-        # (Standard UI/Logic Initialization continues below...)
-        # ... [Previous init_ui, fetch_worker, etc. logic] ...
+        btn_trend = QPushButton("🔥 TRENDING"); btn_trend.clicked.connect(self.run_trending)
+        side_layout.addWidget(btn_trend)
+        
+        rc = QWidget(); rl = QHBoxLayout(rc)
+        self.m_radio = QRadioButton("Movies"); self.m_radio.setChecked(True)
+        self.m_radio.clicked.connect(lambda: self.set_mode("movie"))
+        self.t_radio = QRadioButton("TV"); self.t_radio.clicked.connect(lambda: self.set_mode("tv"))
+        rl.addWidget(self.m_radio); rl.addWidget(self.t_radio)
+        side_layout.addWidget(rc)
 
-    # --- NEW TRAY FUNCTIONS ---
+        side_layout.addWidget(QLabel("\n   GENRES"))
+        for n, i in [("ACTION", 28), ("COMEDY", 35), ("HORROR", 27), ("CRIME", 80), ("TRUE CRIME", "80,99")]:
+            b = QPushButton(n); b.clicked.connect(lambda ch, idx=i: self.run_genre(idx))
+            side_layout.addWidget(b)
+        
+        side_layout.addStretch()
+        self.console = QTextEdit(); self.console.setObjectName("Console")
+        self.console.setReadOnly(True); self.console.setFixedHeight(120)
+        side_layout.addWidget(self.console)
+        layout.addWidget(self.sidebar)
+        
+        content = QWidget(); c_layout = QVBoxLayout(content)
+        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Search...")
+        self.search_bar.returnPressed.connect(self.run_search)
+        c_layout.addWidget(self.search_bar)
+        
+        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True)
+        self.container = QWidget(); self.container.setObjectName("Gallery")
+        self.grid = QGridLayout(self.container); self.grid.setSpacing(10)
+        self.scroll.setWidget(self.container); c_layout.addWidget(self.scroll)
+        layout.addWidget(content); self.run_trending()
 
-    def toggle_source_from_tray(self):
-        if not self.current_mid: return
-        self.current_source = "Bravo" if self.current_source == "Alpha" else "Alpha"
-        self.switch_action.setText(f"⚡ SWITCH SOURCE ({self.current_source} MODE)")
-        self.launch_movie(self.current_mid, self.current_mtype, auto_switch=True)
+    def show_normal(self): 
+        self.show(); self.raise_(); self.activateWindow()
 
-    def copy_link_to_clipboard(self):
-        if not self.current_mid: return
-        url = f"https://vidsrc.me/embed/{self.current_mtype}?tmdb={self.current_mid}" if self.current_source == "Alpha" else f"https://vidsrc.to/embed/{self.current_mtype}/{self.current_mid}"
-        QApplication.clipboard().setText(url)
-        self.tray_icon.showMessage("Stark Systems", "Link Copied to Clipboard", QSystemTrayIcon.Information, 2000)
+    def set_mode(self, m): 
+        self.current_mode = m; self.run_trending()
 
-    def reset_jason_cache(self):
-        if os.path.exists(JASON_FILE):
-            os.remove(JASON_FILE)
-            self.tray_icon.showMessage("Stark Systems", "Jason's Cache Cleared", QSystemTrayIcon.Critical, 2000)
+    def clear_gallery(self): 
+        self.shown_ids.clear()
+        while self.grid.count():
+            w = self.grid.takeAt(0).widget()
+            if w: w.deleteLater()
 
-    def toggle_ui_visibility(self):
-        if self.isVisible(): self.hide()
-        else: self.show(); self.raise_(); self.activateWindow()
+    def run_trending(self): 
+        self.start_thread(f"https://api.themoviedb.org/3/trending/{self.current_mode}/week")
 
-    def launch_movie(self, mid, mtype, auto_switch=False):
-        """Standard Launch with Tray Update."""
-        self.current_mid = mid; self.current_mtype = mtype
-        url = f"https://vidsrc.me/embed/{mtype}?tmdb={mid}" if self.current_source == "Alpha" else f"https://vidsrc.to/embed/{mtype}/{mid}"
-        webbrowser.open(url)
-        if not auto_switch:
-            self.tray_icon.showMessage("Stark Cinema", "Movie Launched. Right-click icon for Source Switch.", QSystemTrayIcon.Information, 3000)
+    def run_genre(self, g_id): 
+        self.start_thread(f"https://api.themoviedb.org/3/discover/{self.current_mode}?with_genres={g_id}&sort_by=popularity.desc")
+
+    def run_search(self):
+        q = self.search_bar.text().strip()
+        if q: self.start_thread(f"https://api.themoviedb.org/3/search/multi?query={q}")
+
+    def start_thread(self, url):
+        self.task_counter += 1; self.signals.clear_signal.emit()
+        threading.Thread(target=self.fetch_worker, args=(url, self.task_counter), daemon=True).start()
+
+    def fetch_worker(self, url, t_id):
+        try:
+            h = {"Authorization": f"Bearer {STARK_TOKEN}"}
+            mem = get_jason(); count = 1; page = 1; is_search = "search" in url
+            self.signals.log_signal.emit(f"🔎 Conveyor Belt active...")
+            while count <= 60 and page <= 40:
+                conn = "&" if "?" in url else "?"
+                p_url = f"{url}{conn}page={page}"
+                res = requests.get(p_url, headers=h).json(); raw = res.get('results', [])
+                if not raw: break
+                for item in raw:
+                    if t_id != self.task_counter: return
+                    mid = str(item['id'])
+                    if mid in self.shown_ids or (not is_search and 16 in item.get('genre_ids', [])): continue
+                    mtype = item.get('media_type', self.current_mode)
+                    
+                    if self.recon_verify(mid, mtype, mem):
+                        self.shown_ids.add(mid)
+                        self.executor.submit(self.img_worker, item, count, mtype, t_id)
+                        count += 1
+                        time.sleep(0.25) # EASY ON THE PC DELAY
+                        if count > 60: break
+                page += 1
+        except: pass
+
+    def recon_verify(self, mid, mtype, mem):
+        if mid in mem and mem[mid]['status'] == "Available": return True
+        for s in [f"https://vidsrc.me/embed/{mtype}?tmdb={mid}", f"https://vidsrc.to/embed/{mtype}/{mid}"]:
+            try:
+                if requests.head(s, timeout=1.2).status_code == 200:
+                    save_to_jason(mid, "Available"); return True
+            except: continue
+        return False
+
+    def img_worker(self, item, rank, mtype, tid):
+        if tid != self.task_counter: return
+        try:
+            url = f"https://image.tmdb.org/t/p/w300{item['poster_path']}"
+            data = requests.get(url, timeout=5).content; pix = QPixmap()
+            pix.loadFromData(data)
+            self.signals.item_signal.emit(item, pix.scaled(165, 245, Qt.KeepAspectRatio, Qt.SmoothTransformation), rank, mtype, tid)
+        except: pass
+
+    def add_item_to_ui(self, item, pix, rank, mtype, tid):
+        if tid != self.task_counter: return
+        f = QFrame(); f.setObjectName("MovieCard"); l = QVBoxLayout(f)
+        p = QLabel(); p.setPixmap(pix); l.addWidget(p, alignment=Qt.AlignCenter)
+        title = (item.get('title
