@@ -18,7 +18,6 @@ from PyQt5.QtGui import QPixmap, QImage
 # --- MASTER SPECS ---
 STARK_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJlYjhlNjk5OGE0MGVhYmY0YmZjODg0NGI1YWJmNjM0OCIsIm5iZiI6MTc3MDk1NDE2NC40MjQsInN1YiI6IjY5OGU5ZGI0MTYxYmU0NzBjODJmMzBhYSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7vRC52l-A-wHieUWk65LelT8dLFYMD70kxas_p5qWu4"
 JASON_FILE = "status_cache.json"
-LOGO_PATH = "logo.png"
 
 STYLESHEET = """
 QMainWindow { background-color: #050000; }
@@ -29,13 +28,11 @@ QScrollArea { background-color: #050000; border: none; }
 QWidget#Gallery { background-color: #050000; } 
 QFrame#MovieCard { background-color: #1a0000; border-radius: 12px; border: 2px solid #330000; padding: 8px; margin: 5px; }
 
-/* 🟢 ALL BUTTONS INITIAL STATE */
-QPushButton { background-color: #111; color: #ff3333; border: 1px solid #aa0000; border-radius: 8px; padding: 8px; font-weight: bold; }
+QPushButton { background-color: #111; color: #ff3333; border: 1px solid #aa0000; border-radius: 8px; padding: 8px; font-weight: bold; margin-bottom: 2px; }
 
-/* 🟢 NEON GREEN HOVER - ALL BUTTONS & INPUTS */
+/* 🟢 NEON GREEN HOVER */
 QPushButton:hover, QLineEdit:hover { border: 2px solid #00ff00; color: #00ff00; }
 
-/* 🟢 WATCH BUTTONS - LIVE STATE */
 QPushButton#WatchBtn { background-color: #002200; color: #00ff00; border: 2px solid #00ff00; }
 QPushButton#WatchBtn:disabled { background-color: #111; color: #444; border: 1px solid #222; }
 
@@ -53,7 +50,7 @@ class SignalHandler(QObject):
 class MoviePlusPro(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("STARK CINEMA - PRO V7.0")
+        self.setWindowTitle("STARK CINEMA - PRO V7.1")
         self.resize(1550, 950)
         self.setStyleSheet(STYLESHEET)
         
@@ -89,6 +86,14 @@ class MoviePlusPro(QMainWindow):
         btn_trend.clicked.connect(self.run_trending)
         side_layout.addWidget(btn_trend)
         
+        # 🟢 GENRE BUTTONS - RESTORED
+        side_layout.addWidget(QLabel("\n   MASTER GENRES"))
+        genres = [("ACTION", 28), ("COMEDY", 35), ("HORROR", 27), ("CRIME", 80), ("TRUE CRIME", "80,99")]
+        for name, g_id in genres:
+            b = QPushButton(name)
+            b.clicked.connect(lambda checked=False, idx=g_id: self.run_genre(idx))
+            side_layout.addWidget(b)
+        
         # Mode Switch
         mode_box = QWidget()
         mode_l = QHBoxLayout(mode_box)
@@ -101,7 +106,6 @@ class MoviePlusPro(QMainWindow):
         mode_l.addWidget(self.t_radio)
         side_layout.addWidget(mode_box)
 
-        # Settings
         btn_settings = QPushButton("⚙️ CLEAR SYSTEM CACHE")
         btn_settings.clicked.connect(self.clear_cache)
         side_layout.addWidget(btn_settings)
@@ -109,12 +113,12 @@ class MoviePlusPro(QMainWindow):
         side_layout.addStretch()
         self.console = QTextEdit()
         self.console.setReadOnly(True)
-        self.console.setFixedHeight(150)
+        self.console.setFixedHeight(120)
         self.console.setObjectName("Console")
         side_layout.addWidget(self.console)
         layout.addWidget(self.sidebar)
         
-        # Content Area
+        # Content
         content = QWidget()
         c_layout = QVBoxLayout(content)
         self.search_bar = QLineEdit()
@@ -152,6 +156,10 @@ class MoviePlusPro(QMainWindow):
 
     def run_trending(self):
         url = f"https://api.themoviedb.org/3/trending/{self.current_mode}/week"
+        self.start_thread(url)
+
+    def run_genre(self, g_id):
+        url = f"https://api.themoviedb.org/3/discover/{self.current_mode}?with_genres={g_id}&sort_by=popularity.desc"
         self.start_thread(url)
 
     def run_search(self):
