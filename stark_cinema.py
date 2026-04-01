@@ -55,109 +55,16 @@ class MoviePlusPro(QMainWindow):
         self.signals.item_signal.connect(self.add_item_to_ui)
         self.signals.log_signal.connect(lambda m: self.console.append(f"[{time.strftime('%H:%M:%S')}] {m}"))
         self.signals.clear_signal.connect(self.clear_gallery)
-        self.executor = ThreadPoolExecutor(max_workers=20); self.shown_ids = set(); self.init_ui()
+        self.executor = ThreadPoolExecutor(max_workers=25); self.shown_ids = set(); self.init_ui()
 
     def init_ui(self):
-        self.setWindowTitle("Stark Cinema - Intelligence Level 5"); self.resize(1400, 950); self.setStyleSheet(STYLESHEET)
+        self.setWindowTitle("Stark Cinema - Redundant Core v6.0"); self.resize(1400, 950); self.setStyleSheet(STYLESHEET)
         central = QWidget(); self.setCentralWidget(central); layout = QHBoxLayout(central)
         self.sidebar = QFrame(); self.sidebar.setObjectName("Sidebar"); self.sidebar.setFixedWidth(260); side_layout = QVBoxLayout(self.sidebar)
-        
         if os.path.exists(LOGO_PATH):
             self.logo = QLabel(); self.logo.setPixmap(QPixmap(LOGO_PATH).scaled(220, 120, Qt.KeepAspectRatio))
             side_layout.addWidget(self.logo, alignment=Qt.AlignCenter)
         
         btn_trend = QPushButton("🔥 TRENDING"); btn_trend.clicked.connect(self.run_trending); side_layout.addWidget(btn_trend)
-        
         rc = QWidget(); rl = QHBoxLayout(rc)
-        self.m_radio = QRadioButton("Movies"); self.m_radio.setChecked(True); self.m_radio.clicked.connect(lambda: self.set_mode("movie"))
-        self.t_radio = QRadioButton("TV"); self.t_radio.clicked.connect(lambda: self.set_mode("tv"))
-        rl.addWidget(self.m_radio); rl.addWidget(self.t_radio); side_layout.addWidget(rc)
-
-        side_layout.addWidget(QLabel("\n   GENRES"))
-        for n, i in [("ACTION", 28), ("COMEDY", 35), ("HORROR", 27), ("CRIME", 80), ("TRUE CRIME", "80,99")]:
-            b = QPushButton(n); b.clicked.connect(lambda ch, idx=i: self.run_genre(idx)); side_layout.addWidget(b)
-            
-        side_layout.addStretch(); self.console = QTextEdit(); self.console.setObjectName("Console"); self.console.setReadOnly(True); self.console.setFixedHeight(120)
-        side_layout.addWidget(self.console); layout.addWidget(self.sidebar)
-        
-        content = QWidget(); c_layout = QVBoxLayout(content)
-        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Search Actor or Title..."); self.search_bar.returnPressed.connect(self.run_search); c_layout.addWidget(self.search_bar)
-        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.container = QWidget(); self.container.setObjectName("Gallery"); self.grid = QGridLayout(self.container)
-        self.scroll.setWidget(self.container); c_layout.addWidget(self.scroll); layout.addWidget(content); self.run_trending()
-
-    def set_mode(self, m): self.current_mode = m; self.run_trending()
-    def clear_gallery(self): 
-        self.shown_ids.clear()
-        while self.grid.count():
-            w = self.grid.takeAt(0).widget()
-            if w: w.deleteLater()
-
-    def run_trending(self): self.start_thread(f"https://api.themoviedb.org/3/trending/{self.current_mode}/week")
-    def run_genre(self, g_id): self.start_thread(f"https://api.themoviedb.org/3/discover/{self.current_mode}?with_genres={g_id}&sort_by=popularity.desc")
-    def run_search(self):
-        q = self.search_bar.text().strip()
-        if q: self.start_thread(f"https://api.themoviedb.org/3/search/multi?query={q}")
-
-    def start_thread(self, url):
-        self.task_counter += 1; self.signals.clear_signal.emit()
-        threading.Thread(target=self.fetch_worker, args=(url, self.task_counter), daemon=True).start()
-
-    def fetch_worker(self, url, t_id):
-        try:
-            h = {"Authorization": f"Bearer {self.settings['token']}"}; mem = get_jason()
-            count = 1; page = 1; is_search = "search" in url
-            self.signals.log_signal.emit("🔎 Jason is hunting for 60 HD Titles...")
-
-            while count <= 60 and page <= 25:
-                p_url = f"{url}&page={page}" if "?" in url else f"{url}?page={page}"
-                res = requests.get(p_url, headers=h).json(); raw = res.get('results', [])
-                if not raw: break
-
-                for item in raw:
-                    if t_id != self.task_counter: return
-                    mid = str(item['id'])
-                    
-                    if mid in self.shown_ids or (not is_search and 16 in item.get('genre_ids', [])):
-                        continue
-                    
-                    mtype = item.get('media_type', self.current_mode)
-                    
-                    if self.recon_failover(mid, mtype, mem):
-                        self.shown_ids.add(mid)
-                        self.executor.submit(self.img_worker, item, count, mtype, t_id)
-                        count += 1
-                        if count > 60: break
-                
-                if count > 60: break
-                page += 1
-            
-            self.signals.log_signal.emit(f"✅ Mission Complete. {count-1} Verified HD Titles.")
-        except Exception as e: self.signals.log_signal.emit(f"Scan Error: {e}")
-
-    def recon_failover(self, mid, mtype, mem):
-        if mid in mem and mem[mid]['status'] == "Available": return True
-        u1 = f"https://vidsrc.me/embed/{mtype}?tmdb={mid}"
-        try:
-            if requests.head(u1, timeout=1).status_code == 200:
-                save_to_jason(mid, "Available"); return True
-            return False
-        except: return False
-
-    def img_worker(self, item, rank, mtype, tid):
-        if tid != self.task_counter: return
-        try:
-            url = f"https://image.tmdb.org/t/p/w300{item['poster_path']}"
-            data = requests.get(url).content
-            pix = QPixmap(); pix.loadFromData(data)
-            self.signals.item_signal.emit(item, pix.scaled(200, 300, Qt.KeepAspectRatio), rank, mtype, tid)
-        except: pass
-
-    def add_item_to_ui(self, item, pix, rank, mtype, tid):
-        if tid != self.task_counter: return
-        f = QFrame(); f.setObjectName("MovieCard"); l = QVBoxLayout(f)
-        p = QLabel(); p.setPixmap(pix); l.addWidget(p, alignment=Qt.AlignCenter)
-        title = item.get('title') or item.get('name')
-        t_lbl = QLabel(title[:22]); t_lbl.setStyleSheet("color:white; font-size:11px; font-weight:normal;"); l.addWidget(t_lbl)
-        b = QPushButton("WATCH"); b.setObjectName("WatchBtn")
-        b.clicked.connect(lambda: webbrowser.open(f"https://vidsrc.me/embed/{mtype}?tmdb={item['id']}"))
-        l.addWidget
+        self.m_radio = QRadioButton("Movies"); self.m_radio.setChecked(True); self.m_radio.clicked.connect(lambda: self.
