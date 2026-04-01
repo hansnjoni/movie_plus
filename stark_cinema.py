@@ -23,17 +23,17 @@ QMainWindow { background-color: #1a0033; }
 QFrame#Sidebar { background-color: #0f001a; border-right: 2px solid #ff0000; }
 QLabel { color: #ff0000; font-family: 'Segoe UI'; font-weight: bold; }
 
-/* PURPLE BACKGROUND FOR THE MOVIE GALLERY */
+/* PURPLE BACKGROUND - TIGHTENED PADDING */
 QScrollArea { background-color: #1a0033; border: none; }
-QWidget#Gallery { background-color: #2e004b; padding-right: 35px; }
+QWidget#Gallery { background-color: #2e004b; padding-right: 10px; }
 
-/* STARK RED MOVIE CARDS ON PURPLE */
+/* STARK RED MOVIE CARDS - SLIMMED FOR 5-COLUMN FIT */
 QFrame#MovieCard { 
     background-color: #1a0000; 
-    border-radius: 12px; 
+    border-radius: 10px; 
     border: 2px solid #ff0000; 
-    padding: 8px; 
-    margin: 4px; 
+    padding: 5px; 
+    margin: 2px; 
 }
 
 /* UI ELEMENTS */
@@ -63,7 +63,7 @@ def save_to_jason(m_id, status):
 class MoviePlusPro(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Stark Cinema - Stark Protocol V8.4")
+        self.setWindowTitle("Stark Cinema - Master V8.5 Verified")
         self.resize(1500, 920); self.setStyleSheet(STYLESHEET)
         
         self.settings = {"token": STARK_TOKEN, "timeout": 1.2}
@@ -97,29 +97,46 @@ class MoviePlusPro(QMainWindow):
             self.show_normal()
 
     def init_ui(self):
-        central = QWidget(); self.setCentralWidget(central); layout = QHBoxLayout(central)
-        self.sidebar = QFrame(); self.sidebar.setObjectName("Sidebar"); self.sidebar.setFixedWidth(260); side_layout = QVBoxLayout(self.sidebar)
+        central = QWidget(); self.setCentralWidget(central)
+        layout = QHBoxLayout(central); layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.sidebar = QFrame(); self.sidebar.setObjectName("Sidebar"); self.sidebar.setFixedWidth(260)
+        side_layout = QVBoxLayout(self.sidebar)
         
         if os.path.exists(LOGO_PATH):
-            self.logo = QLabel(); self.logo.setPixmap(QPixmap(LOGO_PATH).scaled(220, 120, Qt.KeepAspectRatio)); side_layout.addWidget(self.logo, alignment=Qt.AlignCenter)
+            self.logo = QLabel(); self.logo.setPixmap(QPixmap(LOGO_PATH).scaled(220, 120, Qt.KeepAspectRatio))
+            side_layout.addWidget(self.logo, alignment=Qt.AlignCenter)
         
-        btn_trend = QPushButton("🔥 TRENDING"); btn_trend.clicked.connect(self.run_trending); side_layout.addWidget(btn_trend)
+        btn_trend = QPushButton("🔥 TRENDING"); btn_trend.clicked.connect(self.run_trending)
+        side_layout.addWidget(btn_trend)
         
         rc = QWidget(); rl = QHBoxLayout(rc)
-        self.m_radio = QRadioButton("Movies"); self.m_radio.setChecked(True); self.m_radio.clicked.connect(lambda: self.set_mode("movie"))
+        self.m_radio = QRadioButton("Movies"); self.m_radio.setChecked(True)
+        self.m_radio.clicked.connect(lambda: self.set_mode("movie"))
         self.t_radio = QRadioButton("TV"); self.t_radio.clicked.connect(lambda: self.set_mode("tv"))
         rl.addWidget(self.m_radio); rl.addWidget(self.t_radio); side_layout.addWidget(rc)
 
         side_layout.addWidget(QLabel("\n   GENRES"))
         for n, i in [("ACTION", 28), ("COMEDY", 35), ("HORROR", 27), ("CRIME", 80), ("TRUE CRIME", "80,99")]:
-            b = QPushButton(n); b.clicked.connect(lambda ch, idx=i: self.run_genre(idx)); side_layout.addWidget(b)
+            b = QPushButton(n); b.clicked.connect(lambda ch, idx=i: self.run_genre(idx))
+            side_layout.addWidget(b)
         
-        side_layout.addStretch(); self.console = QTextEdit(); self.console.setObjectName("Console"); self.console.setReadOnly(True); self.console.setFixedHeight(120); side_layout.addWidget(self.console); layout.addWidget(self.sidebar)
+        side_layout.addStretch()
+        self.console = QTextEdit(); self.console.setObjectName("Console")
+        self.console.setReadOnly(True); self.console.setFixedHeight(120)
+        side_layout.addWidget(self.console)
+        layout.addWidget(self.sidebar)
         
-        content = QWidget(); c_layout = QVBoxLayout(content)
-        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Search..."); self.search_bar.returnPressed.connect(self.run_search); c_layout.addWidget(self.search_bar)
-        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.container = QWidget(); self.container.setObjectName("Gallery"); self.grid = QGridLayout(self.container); self.grid.setSpacing(10)
-        self.scroll.setWidget(self.container); c_layout.addWidget(self.scroll); layout.addWidget(content); self.run_trending()
+        content = QWidget(); c_layout = QVBoxLayout(content); c_layout.setContentsMargins(10, 10, 10, 10)
+        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Search...")
+        self.search_bar.returnPressed.connect(self.run_search)
+        c_layout.addWidget(self.search_bar)
+        
+        self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True)
+        self.container = QWidget(); self.container.setObjectName("Gallery")
+        self.grid = QGridLayout(self.container); self.grid.setSpacing(8)
+        self.scroll.setWidget(self.container); c_layout.addWidget(self.scroll)
+        layout.addWidget(content); self.run_trending()
 
     def show_normal(self): 
         self.show(); self.raise_(); self.activateWindow()
@@ -140,7 +157,8 @@ class MoviePlusPro(QMainWindow):
         self.start_thread(f"https://api.themoviedb.org/3/discover/{self.current_mode}?with_genres={g_id}&sort_by=popularity.desc")
 
     def run_search(self):
-        q = self.search_bar.text().strip(); self.start_thread(f"https://api.themoviedb.org/3/search/multi?query={q}") if q else None
+        q = self.search_bar.text().strip()
+        if q: self.start_thread(f"https://api.themoviedb.org/3/search/multi?query={q}")
 
     def start_thread(self, url):
         self.task_counter += 1; self.signals.clear_signal.emit()
@@ -161,9 +179,10 @@ class MoviePlusPro(QMainWindow):
                     if mid in self.shown_ids or (not is_search and 16 in item.get('genre_ids', [])): continue
                     mtype = item.get('media_type', self.current_mode)
                     if self.recon_verify(mid, mtype, mem):
-                        self.shown_ids.add(mid); self.executor.submit(self.img_worker, item, count, mtype, t_id)
+                        self.shown_ids.add(mid)
+                        self.executor.submit(self.img_worker, item, count, mtype, t_id)
                         count += 1
-                        time.sleep(0.25)
+                        time.sleep(0.25) # CONVEYOR BELT DELAY
                         if count > 60: break
                 page += 1
         except: pass
@@ -181,8 +200,10 @@ class MoviePlusPro(QMainWindow):
         if tid != self.task_counter: return
         try:
             url = f"https://image.tmdb.org/t/p/w300{item['poster_path']}"
-            data = requests.get(url, timeout=5).content; pix = QPixmap(); pix.loadFromData(data)
-            self.signals.item_signal.emit(item, pix.scaled(165, 245, Qt.KeepAspectRatio, Qt.SmoothTransformation), rank, mtype, tid)
+            data = requests.get(url, timeout=5).content; pix = QPixmap()
+            pix.loadFromData(data)
+            # PRECISION FIT: 155px width
+            self.signals.item_signal.emit(item, pix.scaled(155, 230, Qt.KeepAspectRatio, Qt.SmoothTransformation), rank, mtype, tid)
         except: pass
 
     def add_item_to_ui(self, item, pix, rank, mtype, tid):
@@ -190,7 +211,8 @@ class MoviePlusPro(QMainWindow):
         f = QFrame(); f.setObjectName("MovieCard"); l = QVBoxLayout(f)
         p = QLabel(); p.setPixmap(pix); l.addWidget(p, alignment=Qt.AlignCenter)
         title = (item.get('title') or item.get('name'))[:20]
-        l.addWidget(QLabel(title), alignment=Qt.AlignCenter)
+        t_lbl = QLabel(title); t_lbl.setStyleSheet("color:white; font-size:9px;")
+        l.addWidget(t_lbl, alignment=Qt.AlignCenter)
         b = QPushButton("WATCH"); b.setObjectName("WatchBtn")
         b.clicked.connect(lambda: self.launch_movie(item['id'], mtype))
         l.addWidget(b); self.grid.addWidget(f, (rank-1)//5, (rank-1)%5, alignment=Qt.AlignCenter)
