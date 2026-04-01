@@ -1,161 +1,226 @@
-import sys, os, requests, threading, time, json, webbrowser
+import sys, os, requests, threading, time, json, webbrowser, traceback
 from datetime import datetime, timedelta
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLineEdit, QPushButton, QScrollArea, 
-                             QLabel, QGridLayout, QFrame, QRadioButton, QTextEdit, QDialog)
+                             QLabel, QGridLayout, QFrame, QRadioButton, QTextEdit, QDialog, QComboBox)
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
 from PyQt5.QtGui import QPixmap, QImage
 from concurrent.futures import ThreadPoolExecutor
 
-# --- STARK SYSTEM SETTINGS ---
+# --- MASTER SPECS ---
 STARK_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJlYjhlNjk5OGE0MGVhYmY0YmZjODg0NGI1YWJmNjM0OCIsIm5iZiI6MTc3MDk1NDE2NC40MjQsInN1YiI6IjY5OGU5ZGI0MTYxYmU0NzBjODJmMzBhYSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7vRC52l-A-wHieUWk65LelT8dLFYMD70kxas_p5qWu4"
 JASON_FILE = "status_cache.json"
 FAVS_FILE = "favorites.json"
+HISTORY_FILE = "history.json"
+LOGO_PATH = "logo.png"
 
 STYLESHEET = """
 QMainWindow { background-color: #02040a; }
 QFrame#Sidebar { background-color: #080808; border-right: 1px solid #222; }
-QLabel { color: #00ff00; font-family: 'Segoe UI'; font-weight: bold; }
-QLineEdit { background-color: #111; border: 1px solid #00ff00; border-radius: 5px; color: white; padding: 12px; }
-QFrame#MovieCard { background-color: #1a0033; border-radius: 12px; border: 1px solid #330066; padding: 10px; }
+QLabel { color: #ff0000; font-family: 'Segoe UI'; font-weight: bold; }
+QLineEdit { background-color: #111; border: 1px solid #ff0000; border-radius: 5px; color: white; padding: 12px; }
+QLineEdit:hover { border: 1px solid #00ff00; }
+QWidget#GalleryContainer { background-color: #02040a; }
+QScrollArea { border: none; background-color: #02040a; }
+QFrame#MovieCard { background-color: #1a0033; border-radius: 12px; border: 1px solid #330066; margin: 5px; padding: 10px; }
 QFrame#MovieCard:hover { border: 1px solid #00ff00; }
-QPushButton { background-color: #0f0f0f; color: #00ff00; border: 1px solid #004400; border-radius: 8px; padding: 8px; font-weight: bold; }
-QPushButton:hover { background-color: #00ff00; color: black; }
-QTextEdit#Console { background-color: #050505; color: #00ff00; font-family: 'Consolas'; font-size: 11px; }
+QPushButton { background-color: #0f0f0f; color: #ff3333; border: 2px solid #aa0000; border-radius: 10px; padding: 8px; font-weight: bold; }
+QPushButton:hover { background-color: #111; color: #ffffff; border: 2px solid #00ff00; }
+QPushButton#WatchBtn { background-color: #004400; color: #00ff00; border: 2px solid #00ff00; }
+QComboBox { background: #111; color: white; border: 1px solid #ff0000; padding: 5px; }
+QTextEdit#Console { background-color: #050505; color: #00ff00; border: 1px solid #330066; font-family: 'Consolas'; font-size: 11px; }
 """
 
-def get_jason():
-    if os.path.exists(JASON_FILE):
-        with open(JASON_FILE, 'r') as f: return json.load(f)
-    return {}
-
 def save_jason(m_id, status):
-    mem = get_jason()
-    mem[str(m_id)] = {"status": status, "date": str(datetime.now().date())}
-    if len(mem) > 2000:
-        keys = sorted(mem, key=lambda k: mem[k].get('date', ''))
-        for i in range(500): del mem[keys[i]]
-    with open(JASON_FILE, 'w') as f: json.dump(mem, f)
+    try:
+        mem = json.load(open(JASON_FILE)) if os.path.exists(JASON_FILE) else {}
+        mem[str(m_id)] = {"status": status, "date": str(datetime.now().date())}
+        if len(mem) > 2000:
+            keys = sorted(mem, key=lambda k: mem[k].get('date', ''))
+            for i in range(500): del mem[keys[i]]
+        json.dump(mem, open(JASON_FILE, 'w'))
+    except: pass
+
+class EpisodeSelector(QDialog):
+    def __init__(self, show_id, show_name, total_seasons, history, parent=None):
+        super().__init__(parent)
+        self.show_id = str(show_id)
+        self.history = history
+        self.setWindowTitle(f"Stark TV: {show_name}")
+        self.setStyleSheet(STYLESHEET)
+        self.setFixedSize(400, 300)
+        layout = QVBoxLayout(self)
+        
+        self.season_box = QComboBox()
+        for i in range(1, total_seasons + 1): self.season_box.addItem(f"Season {i}", i)
+        layout.addWidget(QLabel("SELECT SEASON"))
+        layout.addWidget(self.season_box)
+        
+        self.ep_box = QComboBox()
+        layout.addWidget(QLabel("SELECT EPISODE"))
+        layout.addWidget(self.ep_box)
+        
+        self.season_box.currentIndexChanged.connect(self.load_episodes)
+        self.load_episodes()
+        
+        btn = QPushButton("🚀 LAUNCH STREAM")
+        btn.clicked.connect(self.accept)
+        layout.addWidget(btn)
+
+    def load_episodes(self):
+        self.ep_box.clear()
+        s = self.season_box.currentData()
+        url = f"https://api.themoviedb.org/3/tv/{self.show_id}/season/{s}?api_key=eb8e6998a40eabf4bfc8844b5abf6348"
+        try:
+            res = requests.get(url).json().get('episodes', [])
+            watched = self.history.get(self.show_id, [])
+            for ep in res:
+                num = ep['episode_number']
+                marker = " ✅" if f"S{s}E{num}" in watched else ""
+                self.ep_box.addItem(f"Ep {num}: {ep['name']}{marker}", num)
+        except: self.ep_box.addItem("Episode 1", 1)
 
 class SignalHandler(QObject):
-    item_signal = pyqtSignal(dict, QPixmap, int, str)
+    item_signal = pyqtSignal(dict, QPixmap, int, str, int)
     log_signal = pyqtSignal(str)
     clear_signal = pyqtSignal()
 
 class MoviePlusPro(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.task_id = 0
-        self.mode = "movie"
+        self.task_counter = 0
+        self.current_mode = "movie"
+        self.history = json.load(open(HISTORY_FILE)) if os.path.exists(HISTORY_FILE) else {}
         self.signals = SignalHandler()
-        self.signals.item_signal.connect(self.add_item)
+        self.signals.item_signal.connect(self.add_item_to_ui)
         self.signals.log_signal.connect(self.update_log)
-        self.signals.clear_signal.connect(self.clear_grid)
-        self.executor = ThreadPoolExecutor(max_workers=10)
+        self.signals.clear_signal.connect(self.clear_gallery)
+        self.executor = ThreadPoolExecutor(max_workers=15)
         
-        self.setWindowTitle("STARK CINEMA V1.0")
-        self.resize(1300, 900)
-        self.setStyleSheet(STYLESHEET)
+        self.resize(1400, 950); self.setStyleSheet(STYLESHEET)
+        central = QWidget(); self.setCentralWidget(central); layout = QHBoxLayout(central)
         
-        # UI Setup
-        central = QWidget()
-        self.setCentralWidget(central)
-        layout = QHBoxLayout(central)
+        self.sidebar = QFrame(); self.sidebar.setObjectName("Sidebar"); self.sidebar.setFixedWidth(260)
+        side_layout = QVBoxLayout(self.sidebar)
         
-        sidebar = QFrame(); sidebar.setObjectName("Sidebar"); sidebar.setFixedWidth(250)
-        side_layout = QVBoxLayout(sidebar)
-        side_layout.addWidget(QLabel("STARK CINEMA"), alignment=Qt.AlignCenter)
+        # Logo
+        self.logo = QLabel()
+        if os.path.exists(LOGO_PATH): self.logo.setPixmap(QPixmap(LOGO_PATH).scaled(220, 120, Qt.KeepAspectRatio))
+        else: self.logo.setText("STARK CINEMA"); self.logo.setStyleSheet("font-size: 24px; color: #ff0000; padding: 10px;")
+        side_layout.addWidget(self.logo, alignment=Qt.AlignCenter)
         
-        btn_tr = QPushButton("🔥 TRENDING"); btn_tr.clicked.connect(self.run_trending)
-        side_layout.addWidget(btn_tr)
+        for text, func in [("🔥 TRENDING", self.run_trending), ("⭐ FAVORITES", self.run_favorites)]:
+            btn = QPushButton(text); btn.clicked.connect(func); side_layout.addWidget(btn)
         
-        btn_fav = QPushButton("⭐ FAVORITES"); btn_fav.clicked.connect(self.run_favorites)
-        side_layout.addWidget(btn_fav)
+        self.m_radio = QRadioButton("Movies"); self.m_radio.setChecked(True); self.m_radio.clicked.connect(lambda: self.set_mode("movie"))
+        self.t_radio = QRadioButton("TV Shows"); self.t_radio.clicked.connect(lambda: self.set_mode("tv"))
+        side_layout.addWidget(self.m_radio); side_layout.addWidget(self.t_radio)
         
-        self.movie_btn = QRadioButton("Movies"); self.movie_btn.setChecked(True)
-        self.movie_btn.toggled.connect(lambda: self.set_mode("movie"))
-        self.tv_btn = QRadioButton("TV Shows"); self.tv_btn.toggled.connect(lambda: self.set_mode("tv"))
-        side_layout.addWidget(self.movie_btn); side_layout.addWidget(self.tv_btn)
-        
+        side_layout.addWidget(QLabel("\n   GENRES"))
+        for n, i in [("ACTION", 28), ("COMEDY", 35), ("HORROR", 27), ("CRIME", 80), ("TRUE CRIME", "80,99")]:
+            btn = QPushButton(n); btn.clicked.connect(lambda checked, idx=i: self.run_genre(idx)); side_layout.addWidget(btn)
+            
         side_layout.addStretch()
-        self.console = QTextEdit(); self.console.setObjectName("Console"); self.console.setReadOnly(True)
-        side_layout.addWidget(self.console)
-        layout.addWidget(sidebar)
+        self.console = QTextEdit(); self.console.setObjectName("Console"); self.console.setReadOnly(True); side_layout.addWidget(self.console)
+        layout.addWidget(self.sidebar)
         
-        content = QWidget(); content_layout = QVBoxLayout(content)
-        self.search = QLineEdit(); self.search.setPlaceholderText("Search..."); self.search.returnPressed.connect(self.run_search)
-        content_layout.addWidget(self.search)
+        content = QWidget(); c_layout = QVBoxLayout(content)
+        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Search Stark Database..."); self.search_bar.returnPressed.connect(self.run_search)
+        c_layout.addWidget(self.search_bar)
         
         self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True)
-        self.grid_widget = QWidget(); self.grid = QGridLayout(self.grid_widget)
-        self.scroll.setWidget(self.grid_widget)
-        content_layout.addWidget(self.scroll)
+        self.container = QWidget(); self.container.setObjectName("GalleryContainer"); self.grid = QGridLayout(self.container)
+        self.scroll.setWidget(self.container); c_layout.addWidget(self.scroll)
         layout.addWidget(content)
-        
         self.run_trending()
 
-    def update_log(self, msg): self.console.append(msg)
-    def set_mode(self, m): self.mode = m; self.run_trending()
-    def clear_grid(self): 
+    def update_log(self, msg): self.console.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
+    def set_mode(self, m): self.current_mode = m; self.run_trending()
+    def clear_gallery(self): 
         while self.grid.count():
             w = self.grid.takeAt(0).widget()
             if w: w.deleteLater()
 
-    def run_trending(self): self.start_work(f"https://api.themoviedb.org/3/trending/{self.mode}/week")
-    def run_search(self): self.start_work(f"https://api.themoviedb.org/3/search/{self.mode}?query={self.search.text()}")
+    def run_trending(self): self.start_thread(f"https://api.themoviedb.org/3/trending/{self.current_mode}/week")
+    def run_search(self): self.start_thread(f"https://api.themoviedb.org/3/search/{self.current_mode}?query={self.search_bar.text()}")
+    def run_genre(self, g_id): self.start_thread(f"https://api.themoviedb.org/3/discover/{self.current_mode}?with_genres={g_id}&sort_by=popularity.desc")
     
     def run_favorites(self):
         self.signals.clear_signal.emit()
         if os.path.exists(FAVS_FILE):
-            with open(FAVS_FILE, 'r') as f:
-                for i, item in enumerate(json.load(f), 1):
-                    self.executor.submit(self.load_item, item, i, self.task_id)
+            for i, item in enumerate(json.load(open(FAVS_FILE)), 1):
+                self.executor.submit(self.img_worker, item, i, item.get('m_type', 'movie'), self.task_counter)
 
-    def start_work(self, url):
-        self.task_id += 1
-        self.signals.clear_signal.emit()
-        threading.Thread(target=self.fetch_worker, args=(url, self.task_id), daemon=True).start()
+    def start_thread(self, url):
+        self.task_counter += 1; self.signals.clear_signal.emit()
+        threading.Thread(target=self.fetch_worker, args=(url, self.task_counter), daemon=True).start()
 
     def fetch_worker(self, url, t_id):
-        headers = {"Authorization": f"Bearer {STARK_TOKEN}"}
-        res = requests.get(url, headers=headers).json().get('results', [])
-        mem = get_jason()
-        count = 1
-        for item in res:
-            if self.task_id != t_id: return
-            m_id = str(item['id'])
-            if m_id in mem and mem[m_id]['status'] == "Available":
-                self.executor.submit(self.load_item, item, count, t_id)
-                count += 1
-            else:
-                threading.Thread(target=self.ping, args=(item, count, t_id, mem), daemon=True).start()
-                count += 1
-            time.sleep(0.05)
+        try:
+            res = requests.get(url, headers={"Authorization": f"Bearer {STARK_TOKEN}"}).json().get('results', [])
+            mem = json.load(open(JASON_FILE)) if os.path.exists(JASON_FILE) else {}
+            count = 1
+            for item in res:
+                if t_id != self.task_counter: return
+                m_id = str(item['id'])
+                if m_id in mem and mem[m_id]['status'] == "Available":
+                    self.executor.submit(self.img_worker, item, count, self.current_mode, t_id)
+                    count += 1
+                else:
+                    threading.Thread(target=self.recon, args=(item, count, t_id), daemon=True).start()
+                    count += 1
+                time.sleep(0.05)
+        except: pass
 
-    def ping(self, item, rank, t_id, mem):
-        url = f"https://vidsrc.me/embed/{'movie' if self.mode=='movie' else 'tv'}?tmdb={item['id']}"
+    def recon(self, item, rank, t_id):
+        url = f"https://vidsrc.me/embed/{'movie' if self.current_mode=='movie' else 'tv'}?tmdb={item['id']}"
         try:
             if requests.head(url, timeout=5).status_code == 200:
                 save_jason(item['id'], "Available")
-                self.executor.submit(self.load_item, item, rank, t_id)
+                self.executor.submit(self.img_worker, item, rank, self.current_mode, t_id)
         except: pass
 
-    def load_item(self, item, rank, t_id):
-        if self.task_id != t_id: return
+    def img_worker(self, item, rank, m_type, t_id):
+        if t_id != self.task_counter: return
         pix = QPixmap()
         if item.get('poster_path'):
-            img_data = requests.get(f"https://image.tmdb.org/t/p/w200{item['poster_path']}").content
-            pix.loadFromData(img_data)
-        self.signals.item_signal.emit(item, pix.scaled(150, 220), rank, self.mode)
+            try:
+                data = requests.get(f"https://image.tmdb.org/t/p/w200{item['poster_path']}").content
+                pix.loadFromData(data)
+            except: pass
+        self.signals.item_signal.emit(item, pix.scaled(150, 220, Qt.KeepAspectRatio, Qt.SmoothTransformation), rank, m_type, t_id)
 
-    def add_item(self, item, pix, rank, m_type):
+    def add_item_to_ui(self, item, pix, rank, m_type, t_id):
+        if t_id != self.task_counter: return
         f = QFrame(); f.setObjectName("MovieCard"); l = QVBoxLayout(f)
-        p = QLabel(); p.setPixmap(pix); l.addWidget(p)
-        b = QPushButton("WATCH"); b.clicked.connect(lambda: webbrowser.open(f"https://vidsrc.me/embed/{m_type}?tmdb={item['id']}"))
-        l.addWidget(b)
+        p = QLabel(); p.setPixmap(pix); l.addWidget(p, alignment=Qt.AlignCenter)
+        row = QHBoxLayout()
+        wb = QPushButton("WATCH"); wb.setObjectName("WatchBtn")
+        wb.clicked.connect(lambda: self.handle_launch(item, m_type))
+        fb = QPushButton("⭐"); fb.setFixedWidth(40); fb.clicked.connect(lambda: self.save_fav(item, m_type))
+        row.addWidget(wb); row.addWidget(fb); l.addLayout(row)
         self.grid.addWidget(f, (rank-1)//5, (rank-1)%5)
 
+    def handle_launch(self, item, m_type):
+        if m_type == "movie":
+            webbrowser.open(f"https://vidsrc.me/embed/movie?tmdb={item['id']}")
+        else:
+            det = requests.get(f"https://api.themoviedb.org/3/tv/{item['id']}?api_key=eb8e6998a40eabf4bfc8844b5abf6348").json()
+            sel = EpisodeSelector(item['id'], item.get('name'), det.get('number_of_seasons', 1), self.history, self)
+            if sel.exec_():
+                s, e = sel.season_box.currentData(), sel.ep_box.currentData()
+                sid = str(item['id'])
+                if sid not in self.history: self.history[sid] = []
+                if f"S{s}E{e}" not in self.history[sid]: self.history[sid].append(f"S{s}E{e}")
+                json.dump(self.history, open(HISTORY_FILE, 'w'))
+                webbrowser.open(f"https://vidsrc.me/embed/tv?tmdb={item['id']}&season={s}&episode={e}")
+
+    def save_fav(self, item, m_type):
+        favs = json.load(open(FAVS_FILE)) if os.path.exists(FAVS_FILE) else []
+        if item['id'] not in [f['id'] for f in favs]:
+            item['m_type'] = m_type
+            favs.append(item); json.dump(favs, open(FAVS_FILE, 'w'))
+            self.update_log(f"⭐ Saved: {item.get('title') or item.get('name')}")
+
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    win = MoviePlusPro(); win.show()
-    sys.exit(app.exec_())
+    app = QApplication(sys.argv); win = MoviePlusPro(); win.show(); sys.exit(app.exec_())
