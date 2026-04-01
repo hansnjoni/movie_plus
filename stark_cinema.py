@@ -1,5 +1,6 @@
 import sys, os, requests, threading, time, json, webbrowser
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor # <-- FIXED: The missing engine part
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLineEdit, QPushButton, QScrollArea, 
                              QLabel, QGridLayout, QFrame, QRadioButton, QTextEdit, QDialog, QComboBox)
@@ -168,7 +169,8 @@ class MoviePlusPro(QMainWindow):
             items = []
             for r in raw:
                 if r.get('media_type') == 'person':
-                    items.extend(requests.get(f"https://api.themoviedb.org/3/person/{r['id']}/combined_credits", headers=h).json().get('cast', []))
+                    p_url = f"https://api.themoviedb.org/3/person/{r['id']}/combined_credits"
+                    items.extend(requests.get(p_url, headers=h).json().get('cast', []))
                 else: items.append(r)
             
             mem = get_jason(); count = 1
@@ -182,10 +184,10 @@ class MoviePlusPro(QMainWindow):
         except: pass
 
     def recon_failover(self, m_id, m_type):
-        url_a = f"https://vidsrc.me/embed/{m_type}?tmdb={m_id}"
-        url_b = f"https://vidsrc.to/embed/{m_type}/{m_id}"
+        u_a = f"https://vidsrc.me/embed/{m_type}?tmdb={m_id}"
+        u_b = f"https://vidsrc.to/embed/{m_type}/{m_id}"
         try:
-            if requests.head(url_a, timeout=3).status_code == 200 or requests.head(url_b, timeout=3).status_code == 200:
+            if requests.head(u_a, timeout=3).status_code == 200 or requests.head(u_b, timeout=3).status_code == 200:
                 save_to_jason(m_id, "Available")
             else: save_to_jason(m_id, "Theaters")
         except: pass
@@ -236,19 +238,4 @@ class MoviePlusPro(QMainWindow):
                 s, e = sel.s_box.currentData(), sel.e_box.currentData()
                 u_me = f"https://vidsrc.me/embed/tv?tmdb={m_id}&season={s}&episode={e}"
                 u_to = f"https://vidsrc.to/embed/tv/{m_id}/{s}/{e}"
-                if m_id not in self.history: self.history[m_id] = []
-                if f"S{s}E{e}" not in self.history[m_id]: self.history[m_id].append(f"S{s}E{e}")
-                json.dump(self.history, open(HISTORY_FILE, 'w'))
-        try:
-            if requests.head(u_me, timeout=3).status_code == 200: webbrowser.open(u_me)
-            else: webbrowser.open(u_to)
-        except: webbrowser.open(u_to)
-
-    def save_fav(self, item, m_type):
-        favs = json.load(open(FAVS_FILE)) if os.path.exists(FAVS_FILE) else []
-        if item['id'] not in [f['id'] for f in favs]:
-            item['m_type'] = m_type; favs.append(item); json.dump(favs, open(FAVS_FILE, 'w'))
-            self.update_log(f"⭐ Saved: {item.get('title') or item.get('name')}")
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv); win = MoviePlusPro(); win.show(); sys.exit(app.exec_())
+                if m_id not in self.history: self.history[m_id
