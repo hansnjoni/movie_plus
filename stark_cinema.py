@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
 from PyQt5.QtGui import QPixmap, QIcon
 
-# --- PROTOCOL: SIGNAL HANDLER (MUST BE DEFINED BEFORE THE MAIN WINDOW) ---
+# --- PROTOCOL: SIGNAL HANDLER ---
 class SignalHandler(QObject):
     item_signal = pyqtSignal(dict, QPixmap, int, str, int)
     log_signal = pyqtSignal(str); clear_signal = pyqtSignal()
@@ -19,17 +19,17 @@ JASON_FILE = "status_cache.json"
 LOGO_PATH = "logo.png"
 
 STYLESHEET = """
-QMainWindow { background-color: #050000; }
-QFrame#Sidebar { background-color: #0a0000; border-right: 2px solid #ff0000; }
+QMainWindow { background-color: #1a0033; }
+QFrame#Sidebar { background-color: #0f001a; border-right: 2px solid #ff0000; }
 QLabel { color: #ff0000; font-family: 'Segoe UI'; font-weight: bold; }
 
-/* KILL WHITE BORDERS IN SCROLL AREA */
-QScrollArea { background-color: #050000; border: none; }
-QWidget#Gallery { background-color: #050000; padding-right: 35px; }
+/* PURPLE BACKGROUND FOR THE MOVIE GALLERY */
+QScrollArea { background-color: #1a0033; border: none; }
+QWidget#Gallery { background-color: #2e004b; padding-right: 35px; }
 
-/* STARK RED MOVIE CARDS - NO WHITE */
+/* STARK RED MOVIE CARDS ON PURPLE */
 QFrame#MovieCard { 
-    background-color: #2a0000; 
+    background-color: #1a0000; 
     border-radius: 12px; 
     border: 2px solid #ff0000; 
     padding: 8px; 
@@ -45,7 +45,6 @@ QPushButton#WatchBtn { background-color: #006600; color: #00ff00; border: 1px so
 QRadioButton { color: #ff0000; font-weight: bold; }
 QTextEdit#Console { background-color: #000; color: #00ff00; border: 1px solid #ff0000; font-family: 'Consolas'; font-size: 11px; }
 
-/* KILL WHITE SELECTION DOTS */
 * { outline: none; }
 """
 
@@ -64,10 +63,9 @@ def save_to_jason(m_id, status):
 class MoviePlusPro(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Stark Cinema - Master V8.2 Verified")
+        self.setWindowTitle("Stark Cinema - Stark Protocol V8.4")
         self.resize(1500, 920); self.setStyleSheet(STYLESHEET)
         
-        # State Control
         self.settings = {"token": STARK_TOKEN, "timeout": 1.2}
         self.current_mid = None; self.current_mtype = None; self.current_source = "Alpha"
         self.shown_ids = set(); self.task_counter = 0; self.current_mode = "movie"
@@ -83,20 +81,27 @@ class MoviePlusPro(QMainWindow):
 
     def setup_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
-        icon = QIcon(LOGO_PATH) if os.path.exists(LOGO_PATH) else self.style().standardIcon(QStyle.SP_MessageBoxInformation)
-        self.tray_icon.setIcon(icon)
+        self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         self.tray_menu = QMenu()
         self.switch_action = QAction("⚡ SWITCH SOURCE", self)
         self.switch_action.triggered.connect(self.toggle_source_from_tray)
         self.tray_menu.addAction(self.switch_action)
-        self.tray_menu.addAction("👁️ SHOW WINDOW").triggered.connect(self.show_normal)
+        self.tray_menu.addAction("👁️ SHOW GALLERY").triggered.connect(self.show_normal)
         self.tray_menu.addAction("❌ EXIT").triggered.connect(sys.exit)
         self.tray_icon.setContextMenu(self.tray_menu)
+        self.tray_icon.activated.connect(self.on_tray_activated)
         self.tray_icon.show()
+
+    def on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.Trigger: 
+            self.show_normal()
 
     def init_ui(self):
         central = QWidget(); self.setCentralWidget(central); layout = QHBoxLayout(central)
         self.sidebar = QFrame(); self.sidebar.setObjectName("Sidebar"); self.sidebar.setFixedWidth(260); side_layout = QVBoxLayout(self.sidebar)
+        
+        if os.path.exists(LOGO_PATH):
+            self.logo = QLabel(); self.logo.setPixmap(QPixmap(LOGO_PATH).scaled(220, 120, Qt.KeepAspectRatio)); side_layout.addWidget(self.logo, alignment=Qt.AlignCenter)
         
         btn_trend = QPushButton("🔥 TRENDING"); btn_trend.clicked.connect(self.run_trending); side_layout.addWidget(btn_trend)
         
@@ -116,16 +121,24 @@ class MoviePlusPro(QMainWindow):
         self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.container = QWidget(); self.container.setObjectName("Gallery"); self.grid = QGridLayout(self.container); self.grid.setSpacing(10)
         self.scroll.setWidget(self.container); c_layout.addWidget(self.scroll); layout.addWidget(content); self.run_trending()
 
-    def show_normal(self): self.show(); self.raise_(); self.activateWindow()
-    def set_mode(self, m): self.current_mode = m; self.run_trending()
+    def show_normal(self): 
+        self.show(); self.raise_(); self.activateWindow()
+
+    def set_mode(self, m): 
+        self.current_mode = m; self.run_trending()
+
     def clear_gallery(self): 
         self.shown_ids.clear()
         while self.grid.count():
             w = self.grid.takeAt(0).widget()
             if w: w.deleteLater()
 
-    def run_trending(self): self.start_thread(f"https://api.themoviedb.org/3/trending/{self.current_mode}/week")
-    def run_genre(self, g_id): self.start_thread(f"https://api.themoviedb.org/3/discover/{self.current_mode}?with_genres={g_id}&sort_by=popularity.desc")
+    def run_trending(self): 
+        self.start_thread(f"https://api.themoviedb.org/3/trending/{self.current_mode}/week")
+
+    def run_genre(self, g_id): 
+        self.start_thread(f"https://api.themoviedb.org/3/discover/{self.current_mode}?with_genres={g_id}&sort_by=popularity.desc")
+
     def run_search(self):
         q = self.search_bar.text().strip(); self.start_thread(f"https://api.themoviedb.org/3/search/multi?query={q}") if q else None
 
@@ -135,8 +148,8 @@ class MoviePlusPro(QMainWindow):
 
     def fetch_worker(self, url, t_id):
         try:
-            h = {"Authorization": f"Bearer {STARK_TOKEN}"}; mem = get_jason(); count = 1; page = 1; is_search = "search" in url
-            self.signals.log_signal.emit(f"🔎 Scanning Network...")
+            h = {"Authorization": f"Bearer {STARK_TOKEN}"}
+            mem = get_jason(); count = 1; page = 1; is_search = "search" in url
             while count <= 60 and page <= 40:
                 conn = "&" if "?" in url else "?"
                 p_url = f"{url}{conn}page={page}"
@@ -150,7 +163,7 @@ class MoviePlusPro(QMainWindow):
                     if self.recon_verify(mid, mtype, mem):
                         self.shown_ids.add(mid); self.executor.submit(self.img_worker, item, count, mtype, t_id)
                         count += 1
-                        time.sleep(0.25) # CONVEYOR BELT DELAY
+                        time.sleep(0.25)
                         if count > 60: break
                 page += 1
         except: pass
@@ -186,7 +199,6 @@ class MoviePlusPro(QMainWindow):
         self.current_mid = mid; self.current_mtype = mtype
         url = f"https://vidsrc.me/embed/{mtype}?tmdb={mid}" if self.current_source == "Alpha" else f"https://vidsrc.to/embed/{mtype}/{mid}"
         webbrowser.open(url)
-        self.tray_icon.showMessage("Stark Cinema", "Movie Launched. Right-click icon to switch sources.", QSystemTrayIcon.Information, 2000)
 
     def toggle_source_from_tray(self):
         if not self.current_mid: return
@@ -197,4 +209,6 @@ class MoviePlusPro(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
-    win = MoviePlusPro(); win.show(); sys.exit(app.exec_())
+    win = MoviePlusPro()
+    win.show()
+    sys.exit(app.exec_())
