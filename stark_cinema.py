@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 
 # --- JARVIS SUBSYSTEM INITIALIZATION ---
-VOICE_ON = True  # Set to False to mute JARVIS
+VOICE_ON = True 
 VOICE_READY = False
 try:
     import speech_recognition as sr
@@ -11,43 +11,20 @@ try:
     VOICE_READY = True
 except: pass
 
-YT_READY = False
-try:
-    from youtubesearchpython import VideosSearch
-    YT_READY = True
-except: pass
-
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLineEdit, QPushButton, QScrollArea, 
                              QLabel, QGridLayout, QFrame, QTextEdit, 
-                             QSystemTrayIcon, QMenu, QAction, QActionGroup, QStyle)
+                             QSystemTrayIcon, QMenu, QAction, QStyle)
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
-from PyQt5.QtGui import QPixmap, QIcon
+from PyQt5.QtGui import QPixmap
 
-# --- SIGNAL HANDLER PROTOCOL ---
+# --- PROTOCOL: SIGNAL HANDLER ---
 class SignalHandler(QObject):
     item_signal = pyqtSignal(dict, QPixmap, int, str, int)
     log_signal = pyqtSignal(str); clear_signal = pyqtSignal()
     voice_status = pyqtSignal(str)
 
 STARK_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJlYjhlNjk5OGE0MGVhYmY0YmZjODg0NGI1YWJmNjM0OCIsIm5iZiI6MTc3MDk1NDE2NC40MjQsInN1YiI6IjY5OGU5ZGI0MTYxYmU0NzBjODJmMzBhYSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7vRC52l-A-wHieUWk65LelT8dLFYMD70kxas_p5qWu4"
-LOGO_PATH = "logo.png"
-
-STYLESHEET = """
-QMainWindow { background-color: #1a0033; }
-QFrame#Sidebar { background-color: #0f001a; border-right: 2px solid #ff0000; }
-QLabel { color: #ff0000; font-family: 'Segoe UI'; font-weight: bold; }
-QScrollArea { background-color: #1a0033; border: none; }
-QWidget#Gallery { background-color: #2e004b; padding-right: 10px; }
-QFrame#MovieCard { background-color: #1a0000; border-radius: 10px; border: 2px solid #ff0000; padding: 5px; }
-QFrame#MovieCard:hover { border: 2px solid #00ff00; background-color: #001a00; }
-QLineEdit { background-color: #111; border: 2px solid #ff0000; border-radius: 8px; color: #00ff00; padding: 12px; font-family: 'Consolas'; }
-QPushButton { background-color: #111; color: #ff3333; border: 1px solid #aa0000; border-radius: 8px; padding: 8px; font-weight: bold; }
-QPushButton:hover { border: 1px solid #00ff00; color: #00ff00; }
-QPushButton#VoiceBtn { background-color: #330033; color: #ff00ff; border: 1px solid #ff00ff; }
-QPushButton#Listening { background-color: #004400; color: #00ff00; border: 2px solid #00ff00; }
-QTextEdit#Console { background-color: #000; color: #00ff00; border: 1px solid #ff0000; font-family: 'Consolas'; font-size: 11px; }
-"""
 
 class MovieCard(QFrame):
     def __init__(self, item, pix, mtype, parent_app):
@@ -61,80 +38,93 @@ class MovieCard(QFrame):
         self.btn = QPushButton("WATCH"); self.btn.clicked.connect(lambda: parent_app.initiate_watch_protocol(item, mtype))
         layout.addWidget(self.btn)
 
-    def enterEvent(self, event):
-        rating = self.item.get('vote_average', 'N/A')
-        date = self.item.get('release_date') or self.item.get('first_air_date') or 'Unknown'
-        summary = self.item.get('overview', 'No data.')[:140] + "..."
-        self.parent_app.signals.log_signal.emit(f"🔍 INTEL: {self.title_str} | ⭐ {rating} | 📅 {date}\n📝 {summary}")
-
-class StarkCinemaMaster(QMainWindow):
+class StarkCinemaApex(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Stark Cinema - Singularity V21.0")
-        self.resize(1500, 920); self.setStyleSheet(STYLESHEET)
+        self.setWindowTitle("Stark Cinema - The Apex V24.0")
+        self.resize(1500, 920)
+        self.setStyleSheet("""
+            QMainWindow { background-color: #1a0033; }
+            QFrame#Sidebar { background-color: #0f001a; border-right: 2px solid #ff0000; }
+            QLabel { color: #ff0000; font-family: 'Segoe UI'; font-weight: bold; }
+            QScrollArea { background-color: #1a0033; border: none; }
+            QWidget#Gallery { background-color: #2e004b; padding-right: 10px; }
+            QFrame#MovieCard { background-color: #1a0000; border-radius: 10px; border: 2px solid #ff0000; padding: 5px; }
+            QFrame#MovieCard:hover { border: 2px solid #00ff00; background-color: #001a00; }
+            QLineEdit { background-color: #111; border: 2px solid #ff0000; border-radius: 8px; color: #00ff00; padding: 12px; }
+            QPushButton { background-color: #111; color: #ff3333; border: 1px solid #aa0000; border-radius: 8px; padding: 8px; font-weight: bold; }
+            QPushButton:hover { border: 1px solid #00ff00; color: #00ff00; }
+            QPushButton#LiveOn { background-color: #004400; color: #00ff00; border: 2px solid #00ff00; }
+            QPushButton#LiveOff { background-color: #330000; color: #ff0000; border: 1px solid #ff0000; }
+            QTextEdit#Console { background-color: #000; color: #00ff00; border: 1px solid #ff0000; font-family: 'Consolas'; font-size: 11px; }
+        """)
         
-        self.pref_file = "neural_prefs.json"; self.prefs = self.load_prefs()
-        self.current_source_idx = 0; self.social_omega = None
-        self.source_list = ["Alpha", "Bravo", "Gamma", "Delta", "Epsilon"]
-        
-        self.shown_ids = set(); self.task_counter = 0; self.current_mode = "movie"
-        self.current_mid = None; self.current_title = None; self.current_mtype = None
-        
+        self.is_live_mode = False
+        self.speak_lock = threading.Lock() 
+        self.task_counter = 0; self.current_mode = "movie"
         self.executor = ThreadPoolExecutor(max_workers=10)
         self.signals = SignalHandler()
         self.signals.item_signal.connect(self.add_item_to_ui)
         self.signals.log_signal.connect(lambda m: self.console.append(f"[{datetime.now().strftime('%H:%M:%S')}] {m}"))
         self.signals.clear_signal.connect(self.clear_gallery)
-        self.signals.voice_status.connect(self.update_voice_ui)
         
         self.init_ui(); self.setup_tray(); self.run_fresh_trending()
-        self.speak("Systems Integrated. All tactical modules online.")
-
-    def load_prefs(self):
-        if os.path.exists(self.pref_file):
-            try:
-                with open(self.pref_file, 'r') as f: return json.load(f)
-            except: pass
-        return {"action": 0, "comedy": 0, "horror": 0, "crime": 0}
+        self.speak("Apex Build synchronized. All tactical modules are integrated.")
 
     def speak(self, text):
         if not VOICE_ON: return
-        cmd = f'PowerShell -Command "Add-Type –AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak(\'{text}\');"'
-        threading.Thread(target=lambda: subprocess.run(cmd, shell=True), daemon=True).start()
+        def run_speech():
+            with self.speak_lock: 
+                cmd = f'PowerShell -Command "Add-Type –AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak(\'{text}\');"'
+                subprocess.run(cmd, shell=True)
+        threading.Thread(target=run_speech, daemon=True).start()
 
     def initiate_watch_protocol(self, item, mtype):
-        self.current_mid = item['id']; self.current_mtype = mtype
-        self.current_title = item.get('title') or item.get('name')
-        
-        # Freshness Check
+        title = item.get('title') or item.get('name')
         rel_date = item.get('release_date') or item.get('first_air_date')
         if rel_date and datetime.strptime(rel_date, '%Y-%m-%d') > datetime.now():
-            self.speak(f"Warning Boss, {self.current_title} is not out on video file yet.")
+            self.speak(f"Negative Boss, {title} is still in theaters. Digital file not found.")
             return
+        self.speak(f"Analyzing {title}.")
+        threading.Thread(target=self.sentinel_worker, args=(item['id'], mtype, title), daemon=True).start()
 
-        self.speak(f"Scouting link health for {self.current_title}.")
-        threading.Thread(target=self.sentinel_worker, daemon=True).start()
-
-    def sentinel_worker(self):
-        test_urls = [
-            f"https://vidsrc.me/embed/{self.current_mtype}?tmdb={self.current_mid}",
-            f"https://vidsrc.to/embed/{self.current_mtype}/{self.current_mid}",
-            f"https://vidsrc.cc/v2/embed/{self.current_mtype}/{self.current_mid}"
-        ]
-        for url in test_urls:
+    def sentinel_worker(self, mid, mtype, title):
+        mirrors = [f"https://vidsrc.me/embed/{mtype}?tmdb={mid}", f"https://vidsrc.to/embed/{mtype}/{mid}"]
+        for url in mirrors:
             try:
                 if requests.head(url, timeout=1.5).status_code == 200:
-                    self.speak("Link secured. Enjoy the show.")
+                    self.speak("Link active. Opening browser.")
                     webbrowser.open(url); return
             except: continue
-        self.speak("I'm sorry Boss, the mirrors are unresponsive.")
+        self.speak("All mirrors are unresponsive for this title.")
 
-    def run_fresh_trending(self):
-        six_mo = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
-        top_g = max(self.prefs, key=self.prefs.get)
-        g_ids = {"action": 28, "comedy": 35, "horror": 27, "crime": 80}
-        url = f"https://api.themoviedb.org/3/discover/{self.current_mode}?sort_by=popularity.desc&primary_release_date.gte={six_mo}&with_genres={g_ids[top_g]}"
-        self.start_thread(url)
+    def toggle_live_mode(self):
+        self.is_live_mode = not self.is_live_mode
+        if self.is_live_mode:
+            self.live_btn.setText("🎙️ LIVE MODE: ACTIVE"); self.live_btn.setObjectName("LiveOn")
+            self.speak("Live link active. I'm listening.")
+            threading.Thread(target=self.live_voice_loop, daemon=True).start()
+        else:
+            self.live_btn.setText("🎙️ LIVE MODE: STANDBY"); self.live_btn.setObjectName("LiveOff")
+            self.speak("Live mode terminated.")
+        self.setStyleSheet(self.styleSheet())
+
+    def live_voice_loop(self):
+        r = sr.Recognizer()
+        while self.is_live_mode:
+            if self.speak_lock.locked(): # Echo-Shield: Don't listen to the speaker output
+                time.sleep(0.5); continue
+            with sr.Microphone() as src:
+                try:
+                    audio = r.listen(src, timeout=3, phrase_time_limit=5)
+                    q = r.recognize_google(audio).lower()
+                    self.signals.log_signal.emit(f"🗣️ Live Command: '{q}'")
+                    if "stop" in q or "off" in q or "terminate" in q:
+                        self.is_live_mode = False; break
+                    self.speak(f"Searching for {q}.")
+                    self.search_bar.setText(q); self.process_command()
+                except: pass
+            time.sleep(0.1)
 
     def init_ui(self):
         central = QWidget(); self.setCentralWidget(central); layout = QHBoxLayout(central); layout.setContentsMargins(0, 0, 0, 0)
@@ -142,64 +132,30 @@ class StarkCinemaMaster(QMainWindow):
         
         side_layout.addWidget(QLabel(" COMMAND CENTER "))
         btn_trend = QPushButton("🔥 FRESH TRENDING"); btn_trend.clicked.connect(self.run_fresh_trending); side_layout.addWidget(btn_trend)
-        self.v_btn = QPushButton("🎙️ VOICE COMMAND"); self.v_btn.setObjectName("VoiceBtn")
-        self.v_btn.clicked.connect(self.start_voice_thread); side_layout.addWidget(self.v_btn)
         
-        side_layout.addWidget(QLabel("\n   NEURAL GENRES"))
-        for n, i in [("ACTION", 28), ("COMEDY", 35), ("HORROR", 27), ("CRIME", 80)]:
-            b = QPushButton(n); b.clicked.connect(lambda ch, idx=i, name=n.lower(): self.run_fresh_genre(idx, name)); side_layout.addWidget(b)
+        self.live_btn = QPushButton("🎙️ LIVE MODE: STANDBY"); self.live_btn.setObjectName("LiveOff")
+        self.live_btn.clicked.connect(self.toggle_live_mode); side_layout.addWidget(self.live_btn)
+        
+        side_layout.addWidget(QLabel("\n   GENRES"))
+        for n, i in [("ACTION", 28), ("COMEDY", 35), ("HORROR", 27), ("TRUE CRIME", "80,99")]:
+            b = QPushButton(n)
+            b.clicked.connect(lambda ch, idx=i: self.start_thread(f"https://api.themoviedb.org/3/discover/{self.current_mode}?with_genres={idx}&primary_release_date.gte={(datetime.now()-timedelta(days=180)).strftime('%Y-%m-%d')}"))
+            side_layout.addWidget(b)
         
         self.console = QTextEdit(); self.console.setObjectName("Console"); self.console.setReadOnly(True); self.console.setFixedHeight(280)
         side_layout.addStretch(); side_layout.addWidget(self.console); layout.addWidget(self.sidebar)
         
         content = QWidget(); c_layout = QVBoxLayout(content)
-        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Search or use taskbar commands..."); self.search_bar.returnPressed.connect(self.process_command); c_layout.addWidget(self.search_bar)
+        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Live Link Monitoring..."); self.search_bar.returnPressed.connect(self.process_command); c_layout.addWidget(self.search_bar)
         self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.container = QWidget(); self.container.setObjectName("Gallery"); self.grid = QGridLayout(self.container); self.grid.setSpacing(10); self.scroll.setWidget(self.container); c_layout.addWidget(self.scroll); layout.addWidget(content)
 
-    def run_fresh_genre(self, g_id, name):
-        self.prefs[name] += 1
-        with open(self.pref_file, 'w') as f: json.dump(self.prefs, f)
+    def run_fresh_trending(self):
         six_mo = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
-        self.start_thread(f"https://api.themoviedb.org/3/discover/{self.current_mode}?with_genres={g_id}&primary_release_date.gte={six_mo}&sort_by=popularity.desc")
-
-    def setup_tray(self):
-        self.tray_icon = QSystemTrayIcon(self); self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        menu = QMenu()
-        
-        # Taskbar Command Center
-        asst = menu.addMenu("🎙️ ASSISTANT")
-        asst.addAction("🎤 Voice Search").triggered.connect(self.start_voice_thread)
-        asst.addAction("🔄 Repair Link").triggered.connect(self.sentinel_worker)
-        
-        disc = menu.addMenu("🔥 DISCOVERY")
-        disc.addAction("Trending (Last 6mo)").triggered.connect(self.run_fresh_trending)
-        
-        menu.addSeparator()
-        menu.addAction("👁️ SHOW").triggered.connect(self.show_normal)
-        menu.addAction("❌ EXIT").triggered.connect(sys.exit)
-        self.tray_icon.setContextMenu(menu); self.tray_icon.show()
-
-    def start_voice_thread(self):
-        if VOICE_READY: threading.Thread(target=self.voice_worker, daemon=True).start()
-        else: self.speak("Ears offline, Boss.")
-
-    def voice_worker(self):
-        self.signals.voice_status.emit("listening"); r = sr.Recognizer()
-        with sr.Microphone() as src:
-            try:
-                q = r.recognize_google(r.listen(src, timeout=5)).lower()
-                if "fix" in q or "broken" in q: self.sentinel_worker()
-                else: self.search_bar.setText(f"play {q}"); self.process_command()
-            except: pass
-        self.signals.voice_status.emit("idle")
-
-    def update_voice_ui(self, status):
-        self.v_btn.setObjectName("Listening" if status == "listening" else "VoiceBtn")
-        self.v_btn.setText("● LISTENING..." if status == "listening" else "🎙️ VOICE COMMAND"); self.setStyleSheet(STYLESHEET)
+        self.start_thread(f"https://api.themoviedb.org/3/discover/{self.current_mode}?sort_by=popularity.desc&primary_release_date.gte={six_mo}")
 
     def process_command(self):
-        cmd = self.search_bar.text().lower().strip()
-        if cmd: self.start_thread(f"https://api.themoviedb.org/3/search/multi?query={cmd.replace('play ', '')}")
+        cmd = self.search_bar.text().strip()
+        if cmd: self.start_thread(f"https://api.themoviedb.org/3/search/multi?query={cmd}")
 
     def start_thread(self, url):
         self.task_counter += 1; self.signals.clear_signal.emit()
@@ -225,12 +181,15 @@ class StarkCinemaMaster(QMainWindow):
         if tid == self.task_counter: 
             card = MovieCard(item, pix, mtype, self); self.grid.addWidget(card, (rank-1)//5, (rank-1)%5, alignment=Qt.AlignCenter)
 
-    def show_normal(self): self.show(); self.raise_(); self.activateWindow()
+    def setup_tray(self):
+        self.tray_icon = QSystemTrayIcon(self); self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        menu = QMenu(); menu.addAction("👁️ SHOW").triggered.connect(self.show); menu.addAction("❌ EXIT").triggered.connect(sys.exit)
+        self.tray_icon.setContextMenu(menu); self.tray_icon.show()
+
     def clear_gallery(self): 
-        self.shown_ids.clear()
         while self.grid.count():
             w = self.grid.takeAt(0).widget()
             if w: w.deleteLater()
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv); app.setQuitOnLastWindowClosed(False); win = StarkCinemaMaster(); win.show(); sys.exit(app.exec_())
+    app = QApplication(sys.argv); app.setQuitOnLastWindowClosed(False); win = StarkCinemaApex(); win.show(); sys.exit(app.exec_())
