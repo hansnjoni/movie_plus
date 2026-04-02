@@ -8,33 +8,45 @@ def live_voice_loop(self):
             for mic in MIC_INVENTORY:
                 try:
                     with sr.Microphone(device_index=mic['id']) as src:
-                        r.adjust_for_ambient_noise(src, duration=0.6) # Filters background hum
+                        # V63.2: Adaptive noise filtering
+                        r.adjust_for_ambient_noise(src, duration=0.6) 
                         self.signals.log_signal.emit("🎤 Listening...")
                         audio = r.listen(src, timeout=4, phrase_time_limit=8)
                         q = r.recognize_google(audio).lower()
                         self.signals.log_signal.emit(f"🗣️ YOU: {q}")
                         
-                        # --- JARVIS IDENTITY & INTENT ENGINE ---
+                        # --- IDENTITY PROTOCOL ---
+                        if "who are you" in q or "your name" in q or "what's your name" in q:
+                            self.speak("I am JARVIS. The Just A Rather Very Intelligent System. Ready for your command, Boss.")
+                            break
+
+                        # --- SYSTEM COMMANDS ---
                         if "stop" in q:
                             self.is_live_mode = False
                             self.signals.log_signal.emit("🛑 Standby initiated.")
                             self.speak("Going to sleep. I'll be here if you need me.")
                             return
 
-                        if "who are you" in q or "your name" in q or "what's your name" in q:
-                            self.speak("I am JARVIS. The Just A Rather Very Intelligent System. Ready for your command, Boss.")
+                        # --- SYNDICATE INTENTS ---
+                        if "horror" in q: 
+                            self.speak("Initializing horror protocol.")
+                            self.run_genre(27)
                             break
-
-                        if "horror" in q: self.run_genre(27); break
-                        if "comedy" in q: self.run_genre(35); break
+                        if "comedy" in q: 
+                            self.speak("Finding something to lighten the mood.")
+                            self.run_genre(35)
+                            break
                         if "true crime" in q or "girlfriend" in q: 
-                            self.speak("Accessing the Syndicate True Crime archives.")
-                            self.run_genre("80,99"); 
+                            self.speak("Accessing the Syndicate True Crime archives for the lady.")
+                            self.run_genre("80,99")
                             break
                         
+                        # --- MOVIE SEARCH AUTO-PILOT ---
                         self.auto_pilot = "play" in q
                         target = q.replace("play", "").replace("movie", "").strip()
-                        self.signals.search_trigger.emit(target)
+                        if target:
+                            self.signals.search_trigger.emit(target)
                         break
-                except: continue
+                except Exception:
+                    continue
             time.sleep(0.5)
