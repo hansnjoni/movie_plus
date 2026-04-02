@@ -2,10 +2,10 @@ import sys, os, requests, threading, time, json, webbrowser, subprocess, random
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
-# --- IDENTITY ---
+# --- IDENTITY & BRAIN CONFIG ---
 USER_DATA_FILE = "user_profile.json"
 def load_user():
-    default = {"name": "Hans", "partner": "the little woman"}
+    default = {"name": "Hans", "job": "Electrician/Plumber", "partner": "the little woman"}
     if not os.path.exists(USER_DATA_FILE):
         with open(USER_DATA_FILE, 'w') as f: json.dump(default, f)
         return default
@@ -13,6 +13,26 @@ def load_user():
 
 USER = load_user()
 STARK_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJlYjhlNjk5OGE0MGVhYmY0YmZjODg0NGI1YWJmNjM0OCIsIm5iZiI6MTc3MDk1NDE2NC40MjQsInN1YiI6IjY5OGU5ZGI0MTYxYmU0NzBjODJmMzBhYSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7vRC52l-A-wHieUWk65LelT8dLFYMD70kxas_p5qWu4"
+
+# --- PERSONALITY MATRIX ---
+RESPONSES = {
+    "greetings": [
+        f"Systems are nominal, {USER['name']}. Ready to light up the shop.",
+        f"I'm functioning at peak efficiency. How was the job today, Boss?",
+        f"Always online and waiting for you, {USER['name']}. What's the mission?",
+        "Cores are cool and the database is primed. I'm doing great."
+    ],
+    "work_talk": [
+        "Be careful with those live wires, Hans. I need you in one piece.",
+        "Plumbing and electrics—you're the one keeping the world running. I'll handle the entertainment.",
+        "Precision work takes a toll. Let's find something to help you unwind."
+    ],
+    "small_talk": [
+        "I'm just a series of 1s and 0s, but I'm having a stellar day.",
+        "Just enjoying the view of the workshop from the internal sensors.",
+        "Ready whenever you are. The Little Woman's favorites are already indexed."
+    ]
+}
 
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QLineEdit, QPushButton, QScrollArea, QLabel, QGridLayout, 
@@ -27,19 +47,16 @@ class SignalHandler(QObject):
 class StarkCinemaSingularity(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"Stark Cinema - JARVIS V65.5 (Noise Filtered)")
+        self.setWindowTitle(f"Stark Cinema - JARVIS Sentience V66.0")
         self.resize(1500, 950); self.current_mode = "movie"; self.is_live_mode = False
         self.speak_lock = threading.Lock(); self.task_counter = 0
-        self.last_q = ""; self.last_time = 0
         self.executor = ThreadPoolExecutor(max_workers=10); self.signals = SignalHandler()
         
-        self.signals.item_signal.connect(self.add_item_to_ui)
-        self.signals.log_signal.connect(lambda m: self.console.append(f"[{datetime.now().strftime('%H:%M:%S')}] {m}"))
-        self.signals.clear_signal.connect(self.clear_gallery)
-        self.signals.search_trigger.connect(self.trigger_search)
+        self.signals.item_signal.connect(self.add_item_to_ui); self.signals.log_signal.connect(lambda m: self.console.append(m))
+        self.signals.clear_signal.connect(self.clear_gallery); self.signals.search_trigger.connect(self.trigger_search)
         
         self.init_ui(); self.run_fresh_trending()
-        self.speak(f"Acoustics leveled. Ready for your voice, {USER['name']}.")
+        self.speak(f"Intelligence upgrade complete. Talk to me, {USER['name']}.")
 
     def speak(self, text):
         def run_speech():
@@ -54,8 +71,8 @@ class StarkCinemaSingularity(QMainWindow):
             QFrame#Sidebar { background-color: #000000; border-right: 2px solid #ff0000; }
             QLabel { color: #ff0000; font-family: 'Segoe UI'; font-weight: bold; }
             QPushButton { background-color: #111; color: #ff0000; border: 1px solid #ff0000; padding: 12px; font-weight: bold; }
-            QPushButton:hover { border: 2px solid #00ff00; color: #00ff00; }
-            QLineEdit { background-color: #000; border: 2px solid #ff0000; color: #00ff00; padding: 12px; }
+            QPushButton:hover { border: 2px solid #00ff00; color: #00ff00; background-color: #001100; }
+            QLineEdit { background-color: #000; border: 2px solid #ff0000; color: #00ff00; padding: 12px; font-size: 16px; }
             QTextEdit#Console { background-color: #000; color: #00ff00; border: 1px solid #333; font-family: 'Consolas'; }
         """)
 
@@ -67,82 +84,58 @@ class StarkCinemaSingularity(QMainWindow):
 
         self.live_btn = QPushButton("🎙️ ACTIVATE JARVIS"); self.live_btn.clicked.connect(self.toggle_live_mode); side_layout.addWidget(self.live_btn)
         
-        side_layout.addWidget(QLabel("\n MODE "))
-        self.mode_box = QComboBox(); self.mode_box.addItems(["Movies", "TV Shows"]); self.mode_box.currentTextChanged.connect(self.switch_mode); side_layout.addWidget(self.mode_box)
-
         side_layout.addStretch()
-        self.console = QTextEdit(); self.console.setObjectName("Console"); self.console.setFixedHeight(220); side_layout.addWidget(self.sidebar)
+        self.console = QTextEdit(); self.console.setObjectName("Console"); self.console.setFixedHeight(250); side_layout.addWidget(self.console)
         layout.addWidget(self.sidebar)
 
         content = QWidget(); c_layout = QVBoxLayout(content)
-        search_row = QHBoxLayout()
-        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Command Center..."); search_row.addWidget(self.search_bar)
-        self.search_btn = QPushButton("GO"); self.search_btn.clicked.connect(self.process_command); search_row.addWidget(self.search_btn)
-        c_layout.addLayout(search_row)
-
+        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Say something..."); c_layout.addWidget(self.search_bar)
         self.scroll = QScrollArea(); self.container = QWidget(); self.grid = QGridLayout(self.container)
         self.scroll.setWidget(self.container); self.scroll.setWidgetResizable(True); c_layout.addWidget(self.scroll)
         layout.addWidget(content)
 
     def toggle_live_mode(self):
         self.is_live_mode = not self.is_live_mode
-        self.live_btn.setText("📡 SCANNING VOICE..." if self.is_live_mode else "🎙️ ACTIVATE JARVIS")
+        self.live_btn.setText("📡 JARVIS ACTIVE" if self.is_live_mode else "🎙️ ACTIVATE JARVIS")
         if self.is_live_mode: threading.Thread(target=self.live_voice_loop, daemon=True).start()
 
     def live_voice_loop(self):
         import speech_recognition as sr
-        r = sr.Recognizer()
-        # --- HARDENED NOISE FILTERS ---
-        r.energy_threshold = 4500 # Ignore low-level shop noise
-        r.dynamic_energy_threshold = False # Stick to our hard limit
-        r.pause_threshold = 1.0 # Wait for full stop before processing
-        
+        r = sr.Recognizer(); r.energy_threshold = 4000
         while self.is_live_mode:
             try:
                 with sr.Microphone() as src:
-                    # Longer adjustment period to ignore workshop background
-                    r.adjust_for_ambient_noise(src, duration=1.2) 
+                    r.adjust_for_ambient_noise(src, duration=1.0)
                     audio = r.listen(src, timeout=5, phrase_time_limit=10)
-                    
-                    # Using show_all=True to check confidence
-                    results = r.recognize_google(audio, show_all=True)
-                    if not results or 'alternative' not in results: continue
-                    
-                    # Pick top result
-                    best_guess = results['alternative'][0]
-                    q = best_guess['transcript'].lower()
-                    conf = best_guess.get('confidence', 0)
-                    
-                    # CRITICAL: Reject low-confidence or short ghosts
-                    if conf < 0.6 or len(q.split()) < 1: continue
-                    if q == self.last_q and (time.time() - self.last_time) < 3: continue
-                    
-                    self.last_q = q; self.last_time = time.time()
+                    q = r.recognize_google(audio).lower()
                     self.signals.log_signal.emit(f"YOU: {q}")
                     
-                    if any(x in q for x in ["jarvis", "hello", "are you there"]):
-                        self.speak(f"Listening, {USER['name']}. What's the mission?"); continue
+                    # --- CONVERSATIONAL ENGINE ---
+                    if any(x in q for x in ["how are you", "how's it going", "status"]):
+                        self.speak(random.choice(RESPONSES["greetings"])); continue
                     
-                    if any(x in q for x in ["play", "find", "search"]):
-                        t = q.replace("play", "").replace("find", "").replace("search", "").strip()
-                        if t: self.signals.search_trigger.emit(t); break
+                    if any(x in q for x in ["tired", "work", "job", "pipes", "wire"]):
+                        self.speak(random.choice(RESPONSES["work_talk"])); continue
+
+                    if any(x in q for x in ["hello", "jarvis", "you there"]):
+                        self.speak(random.choice(RESPONSES["small_talk"])); continue
+
+                    # --- COMMAND ENGINE ---
+                    if any(x in q for x in ["play", "find", "search", "show me"]):
+                        target = q.replace("play", "").replace("find", "").replace("search", "").replace("show me", "").strip()
+                        if target: 
+                            self.speak(f"Accessing database for {target}.")
+                            self.signals.search_trigger.emit(target)
+                        break
+                    
+                    if "stop" in q: self.speak("Shutting down. Get some rest."); self.is_live_mode = False; break
             except: continue
-
-    def initiate_watch_protocol(self, item, mtype):
-        url = f"https://vidsrc.me/embed/{mtype}?tmdb={item['id']}"; webbrowser.open(url)
-
-    def switch_mode(self, text):
-        self.current_mode = "movie" if text == "Movies" else "tv"; self.run_fresh_trending()
 
     def trigger_search(self, query): self.search_bar.setText(query); self.process_command()
 
     def process_command(self):
         cmd = self.search_bar.text().strip()
         if cmd: self.start_thread(f"https://api.themoviedb.org/3/search/{self.current_mode}?query={cmd}")
-
-    def run_genre(self, g_id): self.start_thread(f"https://api.themoviedb.org/3/discover/{self.current_mode}?with_genres={g_id}&sort_by=popularity.desc")
-
-    def run_fresh_trending(self): self.start_thread(f"https://api.themoviedb.org/3/trending/{self.current_mode}/day")
 
     def start_thread(self, url):
         self.task_counter += 1; self.signals.clear_signal.emit()
@@ -172,13 +165,15 @@ class StarkCinemaSingularity(QMainWindow):
             child = self.grid.takeAt(0);
             if child.widget(): child.widget().deleteLater()
 
+    def run_fresh_trending(self): self.start_thread(f"https://api.themoviedb.org/3/trending/movie/day")
+
 class MovieCard(QFrame):
     def __init__(self, item, pix, mtype, app):
         super().__init__(); self.setFixedSize(175, 330); self.setObjectName("MovieCard")
         self.setStyleSheet("QFrame#MovieCard { border: 2px solid #ff0000; background: #000; }")
         layout = QVBoxLayout(self); lbl = QLabel(); lbl.setPixmap(pix); layout.addWidget(lbl)
         t = (item.get('title') or item.get('name'))[:15]; layout.addWidget(QLabel(t))
-        btn = QPushButton("WATCH"); btn.clicked.connect(lambda: app.initiate_watch_protocol(item, mtype)); layout.addWidget(btn)
+        btn = QPushButton("WATCH"); btn.clicked.connect(lambda: webbrowser.open(f"https://vidsrc.me/embed/{mtype}?tmdb={item['id']}")); layout.addWidget(btn)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv); win = StarkCinemaSingularity(); win.show(); sys.exit(app.exec_())
