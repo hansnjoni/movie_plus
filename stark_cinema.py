@@ -29,6 +29,7 @@ class SignalHandler(QObject):
     item_signal = pyqtSignal(dict, QPixmap, int, str, int)
     log_signal = pyqtSignal(str); clear_signal = pyqtSignal()
     voice_status = pyqtSignal(str)
+    search_trigger = pyqtSignal(str) # For thread-safe searching
 
 STARK_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJlYjhlNjk5OGE0MGVhYmY0YmZjODg0NGI1YWJmNjM0OCIsIm5iZiI6MTc3MDk1NDE2NC40MjQsInN1YiI6IjY5OGU5ZGI0MTYxYmU0NzBjODJmMzBhYSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7vRC52l-A-wHieUWk65LelT8dLFYMD70kxas_p5qWu4"
 
@@ -44,10 +45,10 @@ class MovieCard(QFrame):
         self.btn = QPushButton("WATCH"); self.btn.clicked.connect(lambda: parent_app.initiate_watch_protocol(item, mtype))
         layout.addWidget(self.btn)
 
-class StarkCinemaEmpath(QMainWindow):
+class StarkCinemaDirector(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Stark Cinema - The Empath V31.0")
+        self.setWindowTitle("Stark Cinema - The Director V32.0")
         self.resize(1500, 920)
         self.setStyleSheet("""
             QMainWindow { background-color: #1a0033; }
@@ -71,9 +72,10 @@ class StarkCinemaEmpath(QMainWindow):
         self.signals.item_signal.connect(self.add_item_to_ui)
         self.signals.log_signal.connect(lambda m: self.console.append(f"[{datetime.now().strftime('%H:%M:%S')}] {m}"))
         self.signals.clear_signal.connect(self.clear_gallery)
+        self.signals.search_trigger.connect(self.trigger_search)
         
         self.init_ui(); self.setup_tray(); self.run_fresh_trending()
-        self.speak("Systems stabilized. V31 online.")
+        self.speak("Systems Integrated. Director Build 32 is online.")
 
     def speak(self, text):
         if not VOICE_ON: return
@@ -84,67 +86,67 @@ class StarkCinemaEmpath(QMainWindow):
                 subprocess.run(cmd, shell=True)
         threading.Thread(target=run_speech, daemon=True).start()
 
-    def handle_conversation(self, q):
-        # Conversational Intelligence Layer
-        responses = {
-            "how are you": "I'm functioning at peak capacity, Boss. Ready to find some movies.",
-            "how is it going": "All systems are green. The cinema archive is at your disposal.",
-            "who are you": "I am JARVIS, your digital cinema architect.",
-            "thank you": "Always a pleasure, Boss.",
-            "hello": "Greetings. Tell me what you'd like to watch."
+    def handle_small_talk(self, q):
+        conversations = {
+            "how are you": "I'm functioning at full capacity, Boss. Looking for hits.",
+            "what's up": "Just scanning the archives for the latest payloads.",
+            "how is it going": "Everything is green on my end. I'm ready if you are.",
+            "who are you": "I am JARVIS, your digital assistant and cinema architect.",
+            "hello": "Greetings, Boss. What are we watching?"
         }
-        for trigger, response in responses.items():
+        for trigger, response in conversations.items():
             if trigger in q:
-                self.speak(response)
-                return True
+                self.speak(response); return True
         return False
 
     def toggle_live_mode(self):
         self.is_live_mode = not self.is_live_mode
         if self.is_live_mode:
-            self.live_btn.setText("🎙️ LIVE MODE: ACTIVE"); self.live_btn.setObjectName("LiveOn")
-            # Silent Start: Don't speak immediately to allow user to talk
-            self.signals.log_signal.emit("🎙️ LIVE LINK ACTIVE: I'm listening...")
+            self.live_btn.setText("🎙️ LIVE MODE: ON"); self.live_btn.setObjectName("LiveOn")
+            self.signals.log_signal.emit("🎙️ Hands-free mode active. I'm listening.")
             threading.Thread(target=self.live_voice_loop, daemon=True).start()
         else:
-            self.live_btn.setText("🎙️ LIVE MODE: STANDBY"); self.live_btn.setObjectName("LiveOff")
-            self.speak("Going to standby.")
+            self.live_btn.setText("🎙️ LIVE MODE: OFF"); self.live_btn.setObjectName("LiveOff")
+            self.speak("Live link terminated.")
         self.setStyleSheet(self.styleSheet())
 
     def live_voice_loop(self):
         r = sr.Recognizer()
         while self.is_live_mode:
             if self.speak_lock.locked(): 
-                time.sleep(0.5); continue
+                time.sleep(1.0); continue # Wait for speaker to finish
+            
             with sr.Microphone() as src:
+                r.adjust_for_ambient_noise(src, duration=0.5)
                 try:
-                    audio = r.listen(src, timeout=3, phrase_time_limit=5)
+                    self.signals.voice_status.emit("listening")
+                    audio = r.listen(src, timeout=4, phrase_time_limit=5)
                     q = r.recognize_google(audio).lower()
-                    self.signals.log_signal.emit(f"🗣️ Heard: '{q}'")
+                    self.signals.log_signal.emit(f"🗣️ User: '{q}'")
                     
                     if any(x in q for x in ["stop", "off", "exit"]):
                         self.is_live_mode = False; break
                     
-                    # 1. Check for small talk first
-                    if self.handle_conversation(q):
-                        continue
+                    if self.handle_small_talk(q): continue
                     
-                    # 2. Check for commands
                     if "play" in q:
                         self.auto_pilot = True
                         target = q.replace("play", "").replace("the movie", "").strip()
-                        self.speak(f"Processing command. Hunting for {target}.")
-                        self.search_bar.setText(target)
+                        self.speak(f"Processing. Finding {target} for you.")
+                        self.signals.search_trigger.emit(target)
                     else:
                         self.speak(f"Searching for {q}.")
-                        self.search_bar.setText(q)
-                    self.process_command()
+                        self.signals.search_trigger.emit(q)
                 except: pass
             time.sleep(0.1)
 
+    def trigger_search(self, query):
+        self.search_bar.setText(query)
+        self.process_command()
+
     def initiate_watch_protocol(self, item, mtype):
         title = item.get('title') or item.get('name')
-        self.speak(f"Scouting mirrors for {title}.")
+        self.speak(f"Analyzing mirrors for {title}.")
         threading.Thread(target=self.sentinel_worker, args=(item['id'], mtype, title), daemon=True).start()
 
     def sentinel_worker(self, mid, mtype, title):
@@ -156,29 +158,29 @@ class StarkCinemaEmpath(QMainWindow):
         for url in mirrors:
             try:
                 if requests.head(url, timeout=1.5).status_code == 200:
-                    self.speak(f"Mirror secured for {title}.")
+                    self.speak("Enjoy the show, Boss.")
                     webbrowser.open(url); return
             except: continue
         
-        self.speak(f"Primary links for {title} failed. Running Ghost Recon.")
+        self.speak(f"Primary links for {title} are dead. Initiating YouTube Ghost Recon.")
         self.current_title = title; threading.Thread(target=self.yt_worker, daemon=True).start()
 
     def yt_worker(self):
         try:
-            # GHOST RECON: Now optimized for a 30-day window to catch movies like 'Pretty Lethal'
+            # GHOST RECON: Specifically hunts for 2026 fresh uploads (30-day window)
             query = f"{self.current_title} full movie 2026 new link"
             search = VideosSearch(query, limit=5)
             results = search.result()['result']
             for video in results:
                 pub = video.get('publishedTime', 'unknown').lower()
-                # 30-DAY CHECK: If it mentions 'month ago' (plural) or 'year', skip it.
-                if "months" in pub or "year" in pub: continue
+                if "month" in pub and "s" in pub: continue # Skip old plural months
+                if "year" in pub: continue
                 
                 links = re.findall(r'(https?://[^\s]+)', "".join([d['text'] for d in video.get('descriptionSnippet', [])]))
                 if links:
-                    self.speak("Fresh mirror assimilated. Launching.")
+                    self.speak("Fresh social link secured. Launching.")
                     webbrowser.open(links[0]); return
-            self.speak(f"I'm sorry Boss, no fresh links found for {self.current_title}.")
+            self.speak(f"I'm sorry Boss, {self.current_title} is not available on mirrors yet.")
         except: pass
 
     def init_ui(self):
@@ -186,7 +188,7 @@ class StarkCinemaEmpath(QMainWindow):
         self.sidebar = QFrame(); self.sidebar.setObjectName("Sidebar"); self.sidebar.setFixedWidth(280); side_layout = QVBoxLayout(self.sidebar)
         side_layout.addWidget(QLabel(" COMMAND CENTER "))
         btn_trend = QPushButton("🔥 FRESH TRENDING"); btn_trend.clicked.connect(self.run_fresh_trending); side_layout.addWidget(btn_trend)
-        self.live_btn = QPushButton("🎙️ LIVE MODE: STANDBY"); self.live_btn.setObjectName("LiveOff")
+        self.live_btn = QPushButton("🎙️ LIVE MODE: OFF"); self.live_btn.setObjectName("LiveOff")
         self.live_btn.clicked.connect(self.toggle_live_mode); side_layout.addWidget(self.live_btn)
         
         side_layout.addWidget(QLabel("\n   GENRES (6MO)"))
@@ -246,4 +248,4 @@ class StarkCinemaEmpath(QMainWindow):
         except: pass
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv); app.setQuitOnLastWindowClosed(False); win = StarkCinemaEmpath(); win.show(); sys.exit(app.exec_())
+    app = QApplication(sys.argv); app.setQuitOnLastWindowClosed(False); win = StarkCinemaDirector(); win.show(); sys.exit(app.exec_())
