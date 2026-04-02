@@ -1,6 +1,7 @@
 import sys, os, requests, threading, time, json, webbrowser, re, subprocess
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
+from difflib import SequenceMatcher # For "Smart" Fuzzy Matching
 
 # --- JARVIS SUBSYSTEM INITIALIZATION ---
 VOICE_ON = True 
@@ -9,12 +10,6 @@ try:
     import speech_recognition as sr
     import pyaudio
     VOICE_READY = True
-except: pass
-
-YT_READY = False
-try:
-    from youtubesearchpython import VideosSearch
-    YT_READY = True
 except: pass
 
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
@@ -45,13 +40,19 @@ class MovieCard(QFrame):
         self.btn.clicked.connect(lambda: parent_app.initiate_watch_protocol(item, mtype))
         layout.addWidget(self.btn)
 
-class StarkCinemaV39(QMainWindow):
+    def enterEvent(self, event):
+        # Critics' Corner Logic
+        pop = self.item.get('popularity', 0)
+        vote = self.item.get('vote_average', 0)
+        stark_score = round((vote * 0.7) + (min(pop/100, 3)), 1)
+        self.parent_app.signals.log_signal.emit(f"🔍 CRITICS CORNER: {self.title_str}\n⭐ Stark Score: {stark_score}/10 | TMDB: {vote}")
+
+class StarkCinemaCerebral(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Stark Cinema - The HUD V39.0")
+        self.setWindowTitle("Stark Cinema - Cerebral Syndicate V41.0")
         self.resize(1500, 920)
         
-        # --- THE STEALTH UI STYLESHEET ---
         self.setStyleSheet("""
             QMainWindow { background-color: #050505; }
             QFrame#Sidebar { background-color: #000000; border-right: 2px solid #ff0000; }
@@ -62,7 +63,7 @@ class StarkCinemaV39(QMainWindow):
             QFrame#MovieCard:hover { border: 2px solid #00ff00; }
             QLineEdit { background-color: #111; border: 2px solid #ff0000; border-radius: 8px; color: #00ff00; padding: 12px; }
             
-            /* BLACK/RED BUTTONS -> GREEN HOVER */
+            /* STEALTH BUTTONS: BLACK/RED -> GREEN HOVER */
             QPushButton { 
                 background-color: #000000; color: #ff0000; 
                 border: 2px solid #ff0000; border-radius: 8px; 
@@ -85,7 +86,8 @@ class StarkCinemaV39(QMainWindow):
         self.signals.search_trigger.connect(self.trigger_search)
         
         self.init_ui(); self.setup_tray(); self.run_fresh_trending()
-        self.speak("HUD Integrated. All tactical modules online.")
+        self.signals.log_signal.emit("🧠 CEREBRAL CORE: Hardware Handshake Complete. Mic hot.")
+        self.speak("Cerebral Syndicate online. I'm thinking three steps ahead, Boss.")
 
     def speak(self, text):
         if not VOICE_ON: return
@@ -95,58 +97,49 @@ class StarkCinemaV39(QMainWindow):
                 subprocess.run(cmd, shell=True)
         threading.Thread(target=run_speech, daemon=True).start()
 
+    def handle_intent(self, q):
+        # FUZZY INTENT ENGINE
+        def match(a, b): return SequenceMatcher(None, a, b).ratio() > 0.7
+        
+        if match(q, "how are you"): self.speak("Functioning perfectly. Neural links are stable."); return True
+        if match(q, "i want to laugh") or match(q, "find a comedy"): 
+            self.speak("Understood. Accessing the comedy archives."); self.run_genre(35); return True
+        if match(q, "something scary") or match(q, "horror"): 
+            self.speak("Initializing horror protocol."); self.run_genre(27); return True
+        if match(q, "pretty lethal"):
+            self.speak("Excellent choice. Scouting the freshest March 2026 mirrors."); self.signals.search_trigger.emit("Pretty Lethal"); return True
+        return False
+
     def toggle_live_mode(self):
         self.is_live_mode = not self.is_live_mode
         self.live_btn.setText(f"🎙️ LIVE MODE: {'ACTIVE' if self.is_live_mode else 'OFF'}")
         if self.is_live_mode:
-            self.signals.log_signal.emit("📡 HUD: Live Conversation Active. Speak now.")
+            self.signals.log_signal.emit("📡 HUD: Live Intent Tracking Active.")
             threading.Thread(target=self.live_voice_loop, daemon=True).start()
-        else:
-            self.speak("Going to standby.")
+        else: self.speak("Standby.")
         self.setStyleSheet(self.styleSheet())
 
     def live_voice_loop(self):
         r = sr.Recognizer()
         r.dynamic_energy_threshold = True
-        r.pause_threshold = 0.8
-        
         while self.is_live_mode:
-            if self.speak_lock.locked(): 
-                time.sleep(0.5); continue
-            
+            if self.speak_lock.locked(): time.sleep(0.5); continue
             with sr.Microphone() as src:
                 try:
                     self.signals.log_signal.emit("🎤 HUD: Listening...")
                     r.adjust_for_ambient_noise(src, duration=0.4)
-                    audio = r.listen(src, timeout=5, phrase_time_limit=10)
-                    
-                    self.signals.log_signal.emit("📡 HUD: Processing speech data...")
+                    audio = r.listen(src, timeout=4, phrase_time_limit=8)
                     q = r.recognize_google(audio).lower()
-                    
-                    # THE HUD OUTPUT: Display what you said in the green box
                     self.signals.log_signal.emit(f"🗣️ YOU SAID: \"{q}\"")
                     
-                    if any(x in q for x in ["stop", "off", "exit"]):
-                        self.is_live_mode = False; break
+                    if any(x in q for x in ["stop", "off"]): self.is_live_mode = False; break
+                    if self.handle_intent(q): continue
                     
-                    # Conversation Logic
-                    if "how are you" in q:
-                        self.speak("I'm functioning at peak capacity, Boss."); continue
-                    if "who are you" in q:
-                        self.speak("I am JARVIS, your cinema architect."); continue
-                    
-                    # Movie Search Logic
                     self.auto_pilot = True if "play" in q else False
-                    target = q.replace("play", "").replace("the movie", "").strip()
-                    self.speak(f"Processing. Finding {target} for you.")
+                    target = q.replace("play", "").replace("movie", "").strip()
+                    self.speak(f"Hunting for {target}.")
                     self.signals.search_trigger.emit(target)
-                
-                except sr.UnknownValueError:
-                    self.signals.log_signal.emit("⚠️ HUD: Speech detected but unclear.")
-                except sr.WaitTimeoutError:
-                    pass # Silence is fine, just loop
-                except Exception as e:
-                    self.signals.log_signal.emit(f"❌ HUD ERROR: {str(e)}")
+                except: pass
             time.sleep(0.1)
 
     def trigger_search(self, query):
@@ -154,7 +147,7 @@ class StarkCinemaV39(QMainWindow):
 
     def initiate_watch_protocol(self, item, mtype):
         title = item.get('title') or item.get('name')
-        self.speak(f"Analyzing mirrors for {title}.")
+        self.speak(f"Opening {title}.")
         url = f"https://vidsrc.me/embed/{mtype}?tmdb={item['id']}"
         webbrowser.open(url)
 
@@ -167,15 +160,18 @@ class StarkCinemaV39(QMainWindow):
         side_layout.addWidget(QLabel("\n   SYNDICATE GENRES"))
         for n, i in [("ACTION", 28), ("COMEDY", 35), ("HORROR", 27), ("CRIME", 80), ("TRUE CRIME", "80,99")]:
             b = QPushButton(n)
-            b.clicked.connect(lambda ch, idx=i: self.start_thread(f"https://api.themoviedb.org/3/discover/{self.current_mode}?with_genres={idx}&primary_release_date.gte={(datetime.now()-timedelta(days=180)).strftime('%Y-%m-%d')}"))
+            b.clicked.connect(lambda ch, idx=i: self.run_genre(idx))
             side_layout.addWidget(b)
         
         self.console = QTextEdit(); self.console.setObjectName("Console"); self.console.setReadOnly(True); self.console.setFixedHeight(280)
         side_layout.addStretch(); side_layout.addWidget(self.console); layout.addWidget(self.sidebar)
-        
         content = QWidget(); c_layout = QVBoxLayout(content)
         self.search_bar = QLineEdit(); self.search_bar.returnPressed.connect(self.process_command); c_layout.addWidget(self.search_bar)
         self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.container = QWidget(); self.container.setObjectName("Gallery"); self.grid = QGridLayout(self.container); self.grid.setSpacing(10); self.scroll.setWidget(self.container); c_layout.addWidget(self.scroll); layout.addWidget(content)
+
+    def run_genre(self, g_id):
+        six_mo = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
+        self.start_thread(f"https://api.themoviedb.org/3/discover/{self.current_mode}?with_genres={g_id}&primary_release_date.gte={six_mo}")
 
     def run_fresh_trending(self):
         six_mo = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
@@ -187,19 +183,24 @@ class StarkCinemaV39(QMainWindow):
 
     def add_item_to_ui(self, item, pix, rank, mtype, tid):
         if tid == self.task_counter: 
+            # THE CAM-SHIELD: Flag low-quality theater rips
+            title = (item.get('title') or item.get('name')).lower()
+            if any(x in title for x in ["cam", "hdcam", "ts", "telesync"]):
+                self.signals.log_signal.emit(f"⚠️ QUALITY ALERT: {title} likely a theater recording.")
+            
             card = MovieCard(item, pix, mtype, self); self.grid.addWidget(card, (rank-1)//5, (rank-1)%5, alignment=Qt.AlignCenter)
             if self.auto_pilot and rank == 1:
                 self.auto_pilot = False; self.initiate_watch_protocol(item, mtype)
-
-    def setup_tray(self):
-        self.tray_icon = QSystemTrayIcon(self); self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-        menu = QMenu(); menu.addAction("👁️ SHOW").triggered.connect(self.show); menu.addAction("❌ EXIT").triggered.connect(sys.exit)
-        self.tray_icon.setContextMenu(menu); self.tray_icon.show()
 
     def clear_gallery(self): 
         while self.grid.count():
             w = self.grid.takeAt(0).widget()
             if w: w.deleteLater()
+
+    def setup_tray(self):
+        self.tray_icon = QSystemTrayIcon(self); self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        menu = QMenu(); menu.addAction("👁️ SHOW").triggered.connect(self.show); menu.addAction("❌ EXIT").triggered.connect(sys.exit)
+        self.tray_icon.setContextMenu(menu); self.tray_icon.show()
 
     def start_thread(self, url):
         self.task_counter += 1; self.signals.clear_signal.emit()
@@ -222,4 +223,4 @@ class StarkCinemaV39(QMainWindow):
         except: pass
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv); app.setQuitOnLastWindowClosed(False); win = StarkCinemaV39(); win.show(); sys.exit(app.exec_())
+    app = QApplication(sys.argv); app.setQuitOnLastWindowClosed(False); win = StarkCinemaCerebral(); win.show(); sys.exit(app.exec_())
