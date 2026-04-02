@@ -1,15 +1,22 @@
 import sys, os, requests, threading, time, json, webbrowser, re, subprocess
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
-from difflib import SequenceMatcher # For "Smart" Fuzzy Matching
+from difflib import SequenceMatcher # For Smart Intent Parsing
 
-# --- JARVIS SUBSYSTEM INITIALIZATION ---
+# --- JARVIS HARDWARE INITIALIZATION ---
 VOICE_ON = True 
 VOICE_READY = False
 try:
     import speech_recognition as sr
     import pyaudio
     VOICE_READY = True
+    p = pyaudio.PyAudio()
+    # Pre-scan for HUD report
+    MIC_INVENTORY = []
+    for i in range(p.get_device_count()):
+        dev = p.get_device_info_by_index(i)
+        if dev['maxInputChannels'] > 0:
+            MIC_INVENTORY.append(f"[{i}] {dev['name']}")
 except: pass
 
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
@@ -41,18 +48,19 @@ class MovieCard(QFrame):
         layout.addWidget(self.btn)
 
     def enterEvent(self, event):
-        # Critics' Corner Logic
+        # Critics Corner: Stark Score Calculation
         pop = self.item.get('popularity', 0)
         vote = self.item.get('vote_average', 0)
         stark_score = round((vote * 0.7) + (min(pop/100, 3)), 1)
-        self.parent_app.signals.log_signal.emit(f"🔍 CRITICS CORNER: {self.title_str}\n⭐ Stark Score: {stark_score}/10 | TMDB: {vote}")
+        self.parent_app.signals.log_signal.emit(f"⭐ STARK SCORE: {stark_score}/10 | {self.title_str}")
 
-class StarkCinemaCerebral(QMainWindow):
+class StarkCinemaSingularity(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Stark Cinema - Cerebral Syndicate V41.0")
+        self.setWindowTitle("Stark Cinema - Singularity Elite V44.0")
         self.resize(1500, 920)
         
+        # --- THE SYNDICATE STEALTH UI ---
         self.setStyleSheet("""
             QMainWindow { background-color: #050505; }
             QFrame#Sidebar { background-color: #000000; border-right: 2px solid #ff0000; }
@@ -63,7 +71,7 @@ class StarkCinemaCerebral(QMainWindow):
             QFrame#MovieCard:hover { border: 2px solid #00ff00; }
             QLineEdit { background-color: #111; border: 2px solid #ff0000; border-radius: 8px; color: #00ff00; padding: 12px; }
             
-            /* STEALTH BUTTONS: BLACK/RED -> GREEN HOVER */
+            /* BLACK BUTTONS + RED BORDERS -> GREEN HOVER */
             QPushButton { 
                 background-color: #000000; color: #ff0000; 
                 border: 2px solid #ff0000; border-radius: 8px; 
@@ -86,8 +94,14 @@ class StarkCinemaCerebral(QMainWindow):
         self.signals.search_trigger.connect(self.trigger_search)
         
         self.init_ui(); self.setup_tray(); self.run_fresh_trending()
-        self.signals.log_signal.emit("🧠 CEREBRAL CORE: Hardware Handshake Complete. Mic hot.")
-        self.speak("Cerebral Syndicate online. I'm thinking three steps ahead, Boss.")
+        
+        # Hardware HUD Report
+        self.signals.log_signal.emit("🛠️ HARDWARE PROBE: Identifying input channels...")
+        if MIC_INVENTORY:
+            for mic in MIC_INVENTORY: self.signals.log_signal.emit(f"✅ MIC: {mic}")
+        else: self.signals.log_signal.emit("❌ ERROR: No active microphone found.")
+        
+        self.speak("Singularity Elite active. HUD is synchronized and ready for your command.")
 
     def speak(self, text):
         if not VOICE_ON: return
@@ -98,25 +112,22 @@ class StarkCinemaCerebral(QMainWindow):
         threading.Thread(target=run_speech, daemon=True).start()
 
     def handle_intent(self, q):
-        # FUZZY INTENT ENGINE
         def match(a, b): return SequenceMatcher(None, a, b).ratio() > 0.7
-        
-        if match(q, "how are you"): self.speak("Functioning perfectly. Neural links are stable."); return True
-        if match(q, "i want to laugh") or match(q, "find a comedy"): 
-            self.speak("Understood. Accessing the comedy archives."); self.run_genre(35); return True
-        if match(q, "something scary") or match(q, "horror"): 
+        # Conversational / Fuzzy Logic Layer
+        if match(q, "how are you"): self.speak("Functioning at peak capacity, Boss. Mic is hot."); return True
+        if match(q, "i want to laugh") or match(q, "funny movie"):
+            self.speak("Understood. Accessing comedy archives."); self.run_genre(35); return True
+        if match(q, "something scary") or match(q, "horror"):
             self.speak("Initializing horror protocol."); self.run_genre(27); return True
-        if match(q, "pretty lethal"):
-            self.speak("Excellent choice. Scouting the freshest March 2026 mirrors."); self.signals.search_trigger.emit("Pretty Lethal"); return True
         return False
 
     def toggle_live_mode(self):
         self.is_live_mode = not self.is_live_mode
         self.live_btn.setText(f"🎙️ LIVE MODE: {'ACTIVE' if self.is_live_mode else 'OFF'}")
         if self.is_live_mode:
-            self.signals.log_signal.emit("📡 HUD: Live Intent Tracking Active.")
+            self.signals.log_signal.emit("📡 HUD: Live Conversation Active. Check this box for words.")
             threading.Thread(target=self.live_voice_loop, daemon=True).start()
-        else: self.speak("Standby.")
+        else: self.speak("Going to standby.")
         self.setStyleSheet(self.styleSheet())
 
     def live_voice_loop(self):
@@ -128,16 +139,20 @@ class StarkCinemaCerebral(QMainWindow):
                 try:
                     self.signals.log_signal.emit("🎤 HUD: Listening...")
                     r.adjust_for_ambient_noise(src, duration=0.4)
-                    audio = r.listen(src, timeout=4, phrase_time_limit=8)
+                    audio = r.listen(src, timeout=5, phrase_time_limit=10)
+                    
+                    self.signals.log_signal.emit("📡 HUD: Processing data...")
                     q = r.recognize_google(audio).lower()
+                    
+                    # HUD VISUAL FEEDBACK
                     self.signals.log_signal.emit(f"🗣️ YOU SAID: \"{q}\"")
                     
                     if any(x in q for x in ["stop", "off"]): self.is_live_mode = False; break
                     if self.handle_intent(q): continue
                     
                     self.auto_pilot = True if "play" in q else False
-                    target = q.replace("play", "").replace("movie", "").strip()
-                    self.speak(f"Hunting for {target}.")
+                    target = q.replace("play", "").replace("the movie", "").strip()
+                    self.speak(f"Processing. Locating {target}.")
                     self.signals.search_trigger.emit(target)
                 except: pass
             time.sleep(0.1)
@@ -158,6 +173,7 @@ class StarkCinemaCerebral(QMainWindow):
         self.live_btn = QPushButton("🎙️ LIVE MODE: OFF"); self.live_btn.clicked.connect(self.toggle_live_mode); side_layout.addWidget(self.live_btn)
         
         side_layout.addWidget(QLabel("\n   SYNDICATE GENRES"))
+        # ACTION, COMEDY, HORROR, CRIME, TRUE CRIME
         for n, i in [("ACTION", 28), ("COMEDY", 35), ("HORROR", 27), ("CRIME", 80), ("TRUE CRIME", "80,99")]:
             b = QPushButton(n)
             b.clicked.connect(lambda ch, idx=i: self.run_genre(idx))
@@ -183,10 +199,10 @@ class StarkCinemaCerebral(QMainWindow):
 
     def add_item_to_ui(self, item, pix, rank, mtype, tid):
         if tid == self.task_counter: 
-            # THE CAM-SHIELD: Flag low-quality theater rips
+            # CAM-SHIELD
             title = (item.get('title') or item.get('name')).lower()
-            if any(x in title for x in ["cam", "hdcam", "ts", "telesync"]):
-                self.signals.log_signal.emit(f"⚠️ QUALITY ALERT: {title} likely a theater recording.")
+            if any(x in title for x in ["cam", "hdcam", "ts"]):
+                self.signals.log_signal.emit(f"⚠️ CAM-SHIELD: Low quality detected for {title}.")
             
             card = MovieCard(item, pix, mtype, self); self.grid.addWidget(card, (rank-1)//5, (rank-1)%5, alignment=Qt.AlignCenter)
             if self.auto_pilot and rank == 1:
@@ -223,4 +239,4 @@ class StarkCinemaCerebral(QMainWindow):
         except: pass
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv); app.setQuitOnLastWindowClosed(False); win = StarkCinemaCerebral(); win.show(); sys.exit(app.exec_())
+    app = QApplication(sys.argv); app.setQuitOnLastWindowClosed(False); win = StarkCinemaSingularity(); win.show(); sys.exit(app.exec_())
