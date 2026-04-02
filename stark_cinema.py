@@ -28,7 +28,7 @@ from PyQt5.QtGui import QPixmap
 class SignalHandler(QObject):
     item_signal = pyqtSignal(dict, QPixmap, int, str, int)
     log_signal = pyqtSignal(str); clear_signal = pyqtSignal()
-    search_trigger = pyqtSignal(str) # For thread-safe vocal searches
+    search_trigger = pyqtSignal(str)
 
 STARK_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJlYjhlNjk5OGE0MGVhYmY0YmZjODg0NGI1YWJmNjM0OCIsIm5iZiI6MTc3MDk1NDE2NC40MjQsInN1YiI6IjY5OGU5ZGI0MTYxYmU0NzBjODJmMzBhYSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7vRC52l-A-wHieUWk65LelT8dLFYMD70kxas_p5qWu4"
 
@@ -45,13 +45,13 @@ class MovieCard(QFrame):
         self.btn.clicked.connect(lambda: parent_app.initiate_watch_protocol(item, mtype))
         layout.addWidget(self.btn)
 
-class StarkCinemaOmni(QMainWindow):
+class StarkCinemaV39(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Stark Cinema - Omni-Link V37.0")
+        self.setWindowTitle("Stark Cinema - The HUD V39.0")
         self.resize(1500, 920)
         
-        # --- THE MASTER STEALTH UI ---
+        # --- THE STEALTH UI STYLESHEET ---
         self.setStyleSheet("""
             QMainWindow { background-color: #050505; }
             QFrame#Sidebar { background-color: #000000; border-right: 2px solid #ff0000; }
@@ -77,8 +77,6 @@ class StarkCinemaOmni(QMainWindow):
         self.is_live_mode = False; self.auto_pilot = False
         self.speak_lock = threading.Lock() 
         self.task_counter = 0; self.current_mode = "movie"
-        self.current_title = None; self.current_mid = None; self.current_mtype = None
-        
         self.executor = ThreadPoolExecutor(max_workers=15)
         self.signals = SignalHandler()
         self.signals.item_signal.connect(self.add_item_to_ui)
@@ -87,7 +85,7 @@ class StarkCinemaOmni(QMainWindow):
         self.signals.search_trigger.connect(self.trigger_search)
         
         self.init_ui(); self.setup_tray(); self.run_fresh_trending()
-        self.speak("Omni Link synchronized. Systems are ready for any cinematic payload.")
+        self.speak("HUD Integrated. All tactical modules online.")
 
     def speak(self, text):
         if not VOICE_ON: return
@@ -97,81 +95,68 @@ class StarkCinemaOmni(QMainWindow):
                 subprocess.run(cmd, shell=True)
         threading.Thread(target=run_speech, daemon=True).start()
 
-    def handle_conversation(self, q):
-        res = {
-            "how are you": "Functioning at 100 percent, Boss. Ready to play anything you need.",
-            "who are you": "I am JARVIS, your universal cinema assistant.",
-            "hello": "Greetings. Which movie are we hunting for?",
-            "thank you": "Happy to assist. Enjoy the mission."
-        }
-        for k, v in res.items():
-            if k in q: self.speak(v); return True
-        return False
-
     def toggle_live_mode(self):
         self.is_live_mode = not self.is_live_mode
         self.live_btn.setText(f"🎙️ LIVE MODE: {'ACTIVE' if self.is_live_mode else 'OFF'}")
         if self.is_live_mode:
-            self.signals.log_signal.emit("🎙️ Hands-free loop engaged.")
+            self.signals.log_signal.emit("📡 HUD: Live Conversation Active. Speak now.")
             threading.Thread(target=self.live_voice_loop, daemon=True).start()
-        else: self.speak("Going to standby.")
+        else:
+            self.speak("Going to standby.")
         self.setStyleSheet(self.styleSheet())
 
     def live_voice_loop(self):
         r = sr.Recognizer()
+        r.dynamic_energy_threshold = True
+        r.pause_threshold = 0.8
+        
         while self.is_live_mode:
-            if self.speak_lock.locked(): time.sleep(1.0); continue
+            if self.speak_lock.locked(): 
+                time.sleep(0.5); continue
+            
             with sr.Microphone() as src:
                 try:
-                    r.adjust_for_ambient_noise(src, duration=0.5)
-                    audio = r.listen(src, timeout=4, phrase_time_limit=8)
-                    q = r.recognize_google(audio).lower()
-                    self.signals.log_signal.emit(f"🗣️ Heard: '{q}'")
-                    if any(x in q for x in ["stop", "off"]): self.is_live_mode = False; break
-                    if self.handle_conversation(q): continue
+                    self.signals.log_signal.emit("🎤 HUD: Listening...")
+                    r.adjust_for_ambient_noise(src, duration=0.4)
+                    audio = r.listen(src, timeout=5, phrase_time_limit=10)
                     
+                    self.signals.log_signal.emit("📡 HUD: Processing speech data...")
+                    q = r.recognize_google(audio).lower()
+                    
+                    # THE HUD OUTPUT: Display what you said in the green box
+                    self.signals.log_signal.emit(f"🗣️ YOU SAID: \"{q}\"")
+                    
+                    if any(x in q for x in ["stop", "off", "exit"]):
+                        self.is_live_mode = False; break
+                    
+                    # Conversation Logic
+                    if "how are you" in q:
+                        self.speak("I'm functioning at peak capacity, Boss."); continue
+                    if "who are you" in q:
+                        self.speak("I am JARVIS, your cinema architect."); continue
+                    
+                    # Movie Search Logic
                     self.auto_pilot = True if "play" in q else False
-                    target = q.replace("play", "").replace("movie", "").strip()
-                    self.speak(f"Processing {target}.")
+                    target = q.replace("play", "").replace("the movie", "").strip()
+                    self.speak(f"Processing. Finding {target} for you.")
                     self.signals.search_trigger.emit(target)
-                except: pass
+                
+                except sr.UnknownValueError:
+                    self.signals.log_signal.emit("⚠️ HUD: Speech detected but unclear.")
+                except sr.WaitTimeoutError:
+                    pass # Silence is fine, just loop
+                except Exception as e:
+                    self.signals.log_signal.emit(f"❌ HUD ERROR: {str(e)}")
             time.sleep(0.1)
 
     def trigger_search(self, query):
         self.search_bar.setText(query); self.process_command()
 
     def initiate_watch_protocol(self, item, mtype):
-        self.current_mid = item['id']; self.current_mtype = mtype
-        self.current_title = item.get('title') or item.get('name')
-        self.speak(f"Running reconnaissance for {self.current_title}.")
-        threading.Thread(target=self.sentinel_worker, args=(item,), daemon=True).start()
-
-    def sentinel_worker(self, item):
-        mid, mtype, title = item['id'], self.current_mtype, self.current_title
-        mirrors = [f"https://vidsrc.me/embed/{mtype}?tmdb={mid}", f"https://vidsrc.cc/v2/embed/{mtype}/{mid}"]
-        for url in mirrors:
-            try:
-                if requests.head(url, timeout=1.5).status_code == 200:
-                    self.speak("Mirror healthy. Enjoy."); webbrowser.open(url); return
-            except: continue
-        
-        # PIVOT TO RECON
-        rel_date = item.get('release_date', '2000-01-01')
-        is_new = int(rel_date[:4]) >= 2025
-        threading.Thread(target=self.yt_recon, args=(title, is_new), daemon=True).start()
-
-    def yt_recon(self, title, is_new):
-        try:
-            # Oracle Logic: Search specifically based on movie age
-            suffix = "2026 new link" if is_new else "full movie link"
-            search = VideosSearch(f"{title} {suffix}", limit=5)
-            for video in search.result()['result']:
-                pub = video.get('publishedTime', 'unknown').lower()
-                if is_new and any(x in pub for x in ["month", "year"]): continue
-                links = re.findall(r'(https?://[^\s]+)', "".join([d['text'] for d in video.get('descriptionSnippet', [])]))
-                if links: self.speak("Fresh link found."); webbrowser.open(links[0]); return
-            self.speak("No active links found in the social archives.")
-        except: pass
+        title = item.get('title') or item.get('name')
+        self.speak(f"Analyzing mirrors for {title}.")
+        url = f"https://vidsrc.me/embed/{mtype}?tmdb={item['id']}"
+        webbrowser.open(url)
 
     def init_ui(self):
         central = QWidget(); self.setCentralWidget(central); layout = QHBoxLayout(central); layout.setContentsMargins(0, 0, 0, 0)
@@ -180,13 +165,14 @@ class StarkCinemaOmni(QMainWindow):
         self.live_btn = QPushButton("🎙️ LIVE MODE: OFF"); self.live_btn.clicked.connect(self.toggle_live_mode); side_layout.addWidget(self.live_btn)
         
         side_layout.addWidget(QLabel("\n   SYNDICATE GENRES"))
-        for n, i in [("ACTION", 28), ("HORROR", 27), ("CRIME", 80), ("TRUE CRIME", "80,99")]:
+        for n, i in [("ACTION", 28), ("COMEDY", 35), ("HORROR", 27), ("CRIME", 80), ("TRUE CRIME", "80,99")]:
             b = QPushButton(n)
             b.clicked.connect(lambda ch, idx=i: self.start_thread(f"https://api.themoviedb.org/3/discover/{self.current_mode}?with_genres={idx}&primary_release_date.gte={(datetime.now()-timedelta(days=180)).strftime('%Y-%m-%d')}"))
             side_layout.addWidget(b)
         
         self.console = QTextEdit(); self.console.setObjectName("Console"); self.console.setReadOnly(True); self.console.setFixedHeight(280)
         side_layout.addStretch(); side_layout.addWidget(self.console); layout.addWidget(self.sidebar)
+        
         content = QWidget(); c_layout = QVBoxLayout(content)
         self.search_bar = QLineEdit(); self.search_bar.returnPressed.connect(self.process_command); c_layout.addWidget(self.search_bar)
         self.scroll = QScrollArea(); self.scroll.setWidgetResizable(True); self.container = QWidget(); self.container.setObjectName("Gallery"); self.grid = QGridLayout(self.container); self.grid.setSpacing(10); self.scroll.setWidget(self.container); c_layout.addWidget(self.scroll); layout.addWidget(content)
@@ -205,15 +191,15 @@ class StarkCinemaOmni(QMainWindow):
             if self.auto_pilot and rank == 1:
                 self.auto_pilot = False; self.initiate_watch_protocol(item, mtype)
 
-    def clear_gallery(self): 
-        while self.grid.count():
-            w = self.grid.takeAt(0).widget()
-            if w: w.deleteLater()
-
     def setup_tray(self):
         self.tray_icon = QSystemTrayIcon(self); self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
         menu = QMenu(); menu.addAction("👁️ SHOW").triggered.connect(self.show); menu.addAction("❌ EXIT").triggered.connect(sys.exit)
         self.tray_icon.setContextMenu(menu); self.tray_icon.show()
+
+    def clear_gallery(self): 
+        while self.grid.count():
+            w = self.grid.takeAt(0).widget()
+            if w: w.deleteLater()
 
     def start_thread(self, url):
         self.task_counter += 1; self.signals.clear_signal.emit()
@@ -236,4 +222,4 @@ class StarkCinemaOmni(QMainWindow):
         except: pass
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv); app.setQuitOnLastWindowClosed(False); win = StarkCinemaOmni(); win.show(); sys.exit(app.exec_())
+    app = QApplication(sys.argv); app.setQuitOnLastWindowClosed(False); win = StarkCinemaV39(); win.show(); sys.exit(app.exec_())
