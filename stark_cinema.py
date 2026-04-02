@@ -2,21 +2,7 @@ import sys, os, requests, threading, time, json, webbrowser, subprocess, re
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
-# --- PERMANENT VAULT ---
-MEMORY_DIR = "jarvis_memory"
-if not os.path.exists(MEMORY_DIR): os.makedirs(MEMORY_DIR)
-
-def save_vault(filename, data):
-    with open(os.path.join(MEMORY_DIR, filename), 'w') as f:
-        json.dump(data, f, indent=4)
-
-def load_vault(filename, default):
-    path = os.path.join(MEMORY_DIR, filename)
-    if not os.path.exists(path): save_vault(filename, default); return default
-    with open(path, 'r') as f: return json.load(f)
-
-USER = load_vault("user_profile.json", {"name": "Hans", "birthday": "04-02"})
-INTEL = load_vault("intelligence_vault.json", {"facts": []})
+# --- SYSTEM CONSTANTS ---
 STARK_TOKEN = "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJlYjhlNjk5OGE0MGVhYmY0YmZjODg0NGI1YWJmNjM0OCIsIm5iZiI6MTc3MDk1NDE2NC40MjQsInN1YiI6IjY5OGU5ZGI0MTYxYmU0NzBjODJmMzBhYSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7vRC52l-A-wHieUWk65LelT8dLFYMD70kxas_p5qWu4"
 
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
@@ -32,24 +18,28 @@ class SignalHandler(QObject):
 class StarkCinemaSingularity(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"Stark Cinema - Steady State V80.0")
-        self.resize(1500, 950); self.is_live_mode = False; self.task_counter = 0
+        self.setWindowTitle(f"Stark Cinema - Snap-Action V93.0")
+        self.resize(1500, 950); self.is_live_mode = False; self.is_speaking = False
         self.executor = ThreadPoolExecutor(max_workers=20); self.signals = SignalHandler()
         
-        self.signals.item_signal.connect(self.add_item_to_ui); self.signals.log_signal.connect(lambda m: self.console.append(m))
-        self.signals.clear_signal.connect(self.clear_gallery); self.signals.search_trigger.connect(self.trigger_search)
+        self.signals.item_signal.connect(self.add_item_to_ui)
+        self.signals.log_signal.connect(lambda m: self.console.append(m))
+        self.signals.clear_signal.connect(self.clear_gallery)
+        self.signals.search_trigger.connect(self.trigger_search)
         
         self.init_ui(); self.run_fresh_trending()
-        self.speak(f"Audio bypass engaged. Welcome back, {USER['name']}.")
+        self.signals.log_signal.emit("⚡ [SNAP-ACTION ACTIVE]: Zero-latency relay engaged.")
 
     def speak(self, text):
-        # VISUAL BACKUP: If audio fails, you'll still see it here
         self.signals.log_signal.emit(f"JARVIS: {text}")
         def run_speech():
+            self.is_speaking = True
             clean_text = text.replace("'", "").replace('"', "")
-            # Using a direct system call that doesn't 'wait' for the voice to finish
-            subprocess.Popen(["powershell", "-WindowStyle", "Hidden", "-Command", 
-                             f"$s = New-Object -ComObject SAPI.SpVoice; $s.Speak('{clean_text}')"])
+            # Priority 2 + Detached process for instant 'Mouth'
+            cmd = ["powershell", "-WindowStyle", "Hidden", "-Command", 
+                   f"$s = New-Object -ComObject SAPI.SpVoice; $s.Priority = 2; $s.Speak('{clean_text}')"]
+            subprocess.run(cmd) 
+            self.is_speaking = False
         threading.Thread(target=run_speech, daemon=True).start()
 
     def init_ui(self):
@@ -57,22 +47,52 @@ class StarkCinemaSingularity(QMainWindow):
             QMainWindow { background-color: #000000; }
             QFrame#Sidebar { background-color: #050505; border-right: 3px solid #FF0000; }
             QLabel { color: #FF0000; font-family: 'Segoe UI'; font-weight: bold; }
-            QPushButton { background-color: #1a0000; color: #FF0000; border: 2px solid #FF0000; border-radius: 6px; padding: 12px; font-weight: bold; }
-            QPushButton:hover { border: 2px solid #00FF00; color: #00FF00; background-color: #001100; }
+            QPushButton { background-color: #1a0000; color: #FF0000; border: 2px solid #FF0000; border-radius: 6px; padding: 12px; }
+            QPushButton:hover { border: 2px solid #00FF00; color: #00FF00; }
             QLineEdit { background-color: #000; border: 2px solid #FF0000; color: #00FF00; padding: 12px; font-family: 'Consolas'; }
             QTextEdit#Console { background-color: #000; color: #00FF00; border: 1px solid #333; font-family: 'Consolas'; font-size: 11px; }
         """)
         central = QWidget(); self.setCentralWidget(central); layout = QHBoxLayout(central); layout.setContentsMargins(0,0,0,0)
         self.sidebar = QFrame(); self.sidebar.setObjectName("Sidebar"); self.sidebar.setFixedWidth(280); side_layout = QVBoxLayout(self.sidebar)
-        self.live_btn = QPushButton("🎙️ ACTIVATE JARVIS"); self.live_btn.clicked.connect(self.toggle_live_mode); side_layout.addWidget(self.live_btn)
+        self.live_btn = QPushButton("🎙️ ACTIVATE RELAY"); self.live_btn.clicked.connect(self.toggle_live_mode); side_layout.addWidget(self.live_btn)
         side_layout.addStretch(); self.console = QTextEdit(); self.console.setObjectName("Console"); self.console.setFixedHeight(350); side_layout.addWidget(self.console)
         layout.addWidget(self.sidebar)
         content = QWidget(); c_layout = QVBoxLayout(content)
-        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Direct Intelligence Link..."); c_layout.addWidget(self.search_bar)
+        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("High-pressure line active..."); c_layout.addWidget(self.search_bar)
         self.scroll = QScrollArea(); self.container = QWidget(); self.grid = QGridLayout(self.container); self.scroll.setWidget(self.container); self.scroll.setWidgetResizable(True); c_layout.addWidget(self.scroll); layout.addWidget(content)
 
+    def live_voice_loop(self):
+        import speech_recognition as sr
+        r = sr.Recognizer(); 
+        r.energy_threshold = 3500
+        # SNAP-ACTION TIMING:
+        r.phrase_threshold = 0.3 # Reduced from 0.8 for instant cutoff
+        r.non_speaking_duration = 0.2
+        
+        while self.is_live_mode:
+            if self.is_speaking:
+                time.sleep(0.05)
+                continue
+            try:
+                with sr.Microphone() as src:
+                    audio = r.listen(src, timeout=None, phrase_time_limit=10)
+                    q = r.recognize_google(audio).lower()
+                    self.signals.log_signal.emit(f"LOGGED: {q}")
+                    
+                    # --- INSTANT FIRE ---
+                    if any(x in q for x in ["play", "watch", "find"]):
+                        target = re.sub(r'play|watch|find', '', q).strip()
+                        # Visuals fire first
+                        self.signals.search_trigger.emit(target, 1, 1)
+                        # Voice fires immediately after
+                        self.speak(f"Displaying {target}.")
+                    elif "hi jarvis" in q or "you there" in q:
+                        self.speak("Standing by.")
+                    else:
+                        self.speak(f"Acknowledge: {q}")
+            except: continue
+
     def trigger_search(self, query, s, e): 
-        self.search_bar.setText(f"Targeting: {query} (S{s}E{e})")
         self.start_thread(f"https://api.themoviedb.org/3/search/multi?query={query}", s, e)
 
     def start_thread(self, url, s, e):
@@ -115,29 +135,6 @@ class StarkCinemaSingularity(QMainWindow):
         self.is_live_mode = not self.is_live_mode
         if self.is_live_mode: threading.Thread(target=self.live_voice_loop, daemon=True).start()
 
-    def live_voice_loop(self):
-        import speech_recognition as sr
-        r = sr.Recognizer(); r.energy_threshold = 4000
-        while self.is_live_mode:
-            try:
-                with sr.Microphone() as src:
-                    r.adjust_for_ambient_noise(src, duration=0.8)
-                    audio = r.listen(src, timeout=None, phrase_time_limit=12)
-                    q = r.recognize_google(audio).lower()
-                    self.signals.log_signal.emit(f"YOU: {q}")
-                    
-                    season = 1; episode = 1; target = q
-                    s_match = re.search(r'season (\d+)', q); e_match = re.search(r'episode (\d+)', q)
-                    if s_match: season = int(s_match.group(1))
-                    if e_match: episode = int(e_match.group(1))
-
-                    if any(x in q for x in ["play", "watch", "find", "search"]):
-                        clean_q = re.sub(r'play|watch|find|search|season \d+|episode \d+', '', q).strip()
-                        self.speak(f"Copy that. Locating {clean_q}.")
-                        self.signals.search_trigger.emit(clean_q, season, episode)
-                        break
-            except: continue
-
 class MovieCard(QFrame):
     def __init__(self, item, pix, mtype, app, s, e):
         super().__init__(); self.setFixedSize(175, 330); self.setObjectName("MovieCard")
@@ -146,7 +143,6 @@ class MovieCard(QFrame):
         t = (item.get('name') or item.get('title'))[:15]; layout.addWidget(QLabel(t))
         btn = QPushButton("WATCH"); 
         url = f"https://vidsrc.me/embed/{mtype}?tmdb={item['id']}"
-        if mtype == 'tv': url += f"&season={s}&episode={e}"
         btn.clicked.connect(lambda: webbrowser.open(url)); layout.addWidget(btn)
 
 if __name__ == "__main__":
