@@ -1,22 +1,30 @@
 import sys, os, requests, threading, time, json, webbrowser, re, subprocess
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
-from difflib import SequenceMatcher # For Smart Intent Parsing
+from difflib import SequenceMatcher
 
-# --- JARVIS HARDWARE INITIALIZATION ---
+# --- JARVIS HARDWARE INITIALIZATION (STABILITY FIX) ---
 VOICE_ON = True 
 VOICE_READY = False
+MIC_INVENTORY = [] # FIXED: Defined globally so it's always available
+
 try:
     import speech_recognition as sr
     import pyaudio
     VOICE_READY = True
     p = pyaudio.PyAudio()
-    # Pre-scan for HUD report
-    MIC_INVENTORY = []
     for i in range(p.get_device_count()):
         dev = p.get_device_info_by_index(i)
         if dev['maxInputChannels'] > 0:
             MIC_INVENTORY.append(f"[{i}] {dev['name']}")
+except Exception as e:
+    # App will now continue even if audio libraries are missing
+    VOICE_READY = False
+
+YT_READY = False
+try:
+    from youtubesearchpython import VideosSearch
+    YT_READY = True
 except: pass
 
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
@@ -48,7 +56,6 @@ class MovieCard(QFrame):
         layout.addWidget(self.btn)
 
     def enterEvent(self, event):
-        # Critics Corner: Stark Score Calculation
         pop = self.item.get('popularity', 0)
         vote = self.item.get('vote_average', 0)
         stark_score = round((vote * 0.7) + (min(pop/100, 3)), 1)
@@ -57,10 +64,9 @@ class MovieCard(QFrame):
 class StarkCinemaSingularity(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Stark Cinema - Singularity Elite V44.0")
+        self.setWindowTitle("Stark Cinema - The Stability Patch V45.0")
         self.resize(1500, 920)
         
-        # --- THE SYNDICATE STEALTH UI ---
         self.setStyleSheet("""
             QMainWindow { background-color: #050505; }
             QFrame#Sidebar { background-color: #000000; border-right: 2px solid #ff0000; }
@@ -70,12 +76,9 @@ class StarkCinemaSingularity(QMainWindow):
             QFrame#MovieCard { background-color: #000000; border-radius: 10px; border: 2px solid #ff0000; padding: 5px; }
             QFrame#MovieCard:hover { border: 2px solid #00ff00; }
             QLineEdit { background-color: #111; border: 2px solid #ff0000; border-radius: 8px; color: #00ff00; padding: 12px; }
-            
-            /* BLACK BUTTONS + RED BORDERS -> GREEN HOVER */
             QPushButton { 
-                background-color: #000000; color: #ff0000; 
-                border: 2px solid #ff0000; border-radius: 8px; 
-                padding: 10px; font-weight: bold; font-family: 'Segoe UI';
+                background-color: #000000; color: #ff0000; border: 2px solid #ff0000; 
+                border-radius: 8px; padding: 10px; font-weight: bold; 
             }
             QPushButton:hover { 
                 border: 2px solid #00ff00; color: #00ff00; background-color: #001100;
@@ -98,10 +101,12 @@ class StarkCinemaSingularity(QMainWindow):
         # Hardware HUD Report
         self.signals.log_signal.emit("🛠️ HARDWARE PROBE: Identifying input channels...")
         if MIC_INVENTORY:
-            for mic in MIC_INVENTORY: self.signals.log_signal.emit(f"✅ MIC: {mic}")
-        else: self.signals.log_signal.emit("❌ ERROR: No active microphone found.")
+            for mic in MIC_INVENTORY: self.signals.log_signal.emit(f"✅ MIC FOUND: {mic}")
+        else:
+            self.signals.log_signal.emit("⚠️ WARNING: No active microphones detected.")
+            if not VOICE_READY: self.signals.log_signal.emit("❌ ERROR: Audio drivers (PyAudio) failed to load.")
         
-        self.speak("Singularity Elite active. HUD is synchronized and ready for your command.")
+        self.speak("Stability patch active. I'm ready for your command, Boss.")
 
     def speak(self, text):
         if not VOICE_ON: return
@@ -113,19 +118,19 @@ class StarkCinemaSingularity(QMainWindow):
 
     def handle_intent(self, q):
         def match(a, b): return SequenceMatcher(None, a, b).ratio() > 0.7
-        # Conversational / Fuzzy Logic Layer
-        if match(q, "how are you"): self.speak("Functioning at peak capacity, Boss. Mic is hot."); return True
-        if match(q, "i want to laugh") or match(q, "funny movie"):
-            self.speak("Understood. Accessing comedy archives."); self.run_genre(35); return True
-        if match(q, "something scary") or match(q, "horror"):
-            self.speak("Initializing horror protocol."); self.run_genre(27); return True
+        if match(q, "how are you"): self.speak("Systems are green, Boss."); return True
+        if "comedy" in q or "laugh" in q:
+            self.speak("Accessing comedy archives."); self.run_genre(35); return True
         return False
 
     def toggle_live_mode(self):
+        if not VOICE_READY:
+            self.signals.log_signal.emit("❌ ERROR: Live Mode unavailable. Mic drivers missing.")
+            return
         self.is_live_mode = not self.is_live_mode
         self.live_btn.setText(f"🎙️ LIVE MODE: {'ACTIVE' if self.is_live_mode else 'OFF'}")
         if self.is_live_mode:
-            self.signals.log_signal.emit("📡 HUD: Live Conversation Active. Check this box for words.")
+            self.signals.log_signal.emit("📡 HUD: Live Conversation Active.")
             threading.Thread(target=self.live_voice_loop, daemon=True).start()
         else: self.speak("Going to standby.")
         self.setStyleSheet(self.styleSheet())
@@ -140,19 +145,15 @@ class StarkCinemaSingularity(QMainWindow):
                     self.signals.log_signal.emit("🎤 HUD: Listening...")
                     r.adjust_for_ambient_noise(src, duration=0.4)
                     audio = r.listen(src, timeout=5, phrase_time_limit=10)
-                    
-                    self.signals.log_signal.emit("📡 HUD: Processing data...")
                     q = r.recognize_google(audio).lower()
-                    
-                    # HUD VISUAL FEEDBACK
                     self.signals.log_signal.emit(f"🗣️ YOU SAID: \"{q}\"")
                     
                     if any(x in q for x in ["stop", "off"]): self.is_live_mode = False; break
                     if self.handle_intent(q): continue
                     
-                    self.auto_pilot = True if "play" in q else False
+                    self.auto_pilot = "play" in q
                     target = q.replace("play", "").replace("the movie", "").strip()
-                    self.speak(f"Processing. Locating {target}.")
+                    self.speak(f"Hunting for {target}.")
                     self.signals.search_trigger.emit(target)
                 except: pass
             time.sleep(0.1)
@@ -162,7 +163,7 @@ class StarkCinemaSingularity(QMainWindow):
 
     def initiate_watch_protocol(self, item, mtype):
         title = item.get('title') or item.get('name')
-        self.speak(f"Opening {title}.")
+        self.speak(f"Launching {title}.")
         url = f"https://vidsrc.me/embed/{mtype}?tmdb={item['id']}"
         webbrowser.open(url)
 
@@ -171,14 +172,9 @@ class StarkCinemaSingularity(QMainWindow):
         self.sidebar = QFrame(); self.sidebar.setObjectName("Sidebar"); self.sidebar.setFixedWidth(280); side_layout = QVBoxLayout(self.sidebar)
         side_layout.addWidget(QLabel(" COMMAND CENTER "))
         self.live_btn = QPushButton("🎙️ LIVE MODE: OFF"); self.live_btn.clicked.connect(self.toggle_live_mode); side_layout.addWidget(self.live_btn)
-        
         side_layout.addWidget(QLabel("\n   SYNDICATE GENRES"))
-        # ACTION, COMEDY, HORROR, CRIME, TRUE CRIME
         for n, i in [("ACTION", 28), ("COMEDY", 35), ("HORROR", 27), ("CRIME", 80), ("TRUE CRIME", "80,99")]:
-            b = QPushButton(n)
-            b.clicked.connect(lambda ch, idx=i: self.run_genre(idx))
-            side_layout.addWidget(b)
-        
+            b = QPushButton(n); b.clicked.connect(lambda ch, idx=i: self.run_genre(idx)); side_layout.addWidget(b)
         self.console = QTextEdit(); self.console.setObjectName("Console"); self.console.setReadOnly(True); self.console.setFixedHeight(280)
         side_layout.addStretch(); side_layout.addWidget(self.console); layout.addWidget(self.sidebar)
         content = QWidget(); c_layout = QVBoxLayout(content)
@@ -199,14 +195,10 @@ class StarkCinemaSingularity(QMainWindow):
 
     def add_item_to_ui(self, item, pix, rank, mtype, tid):
         if tid == self.task_counter: 
-            # CAM-SHIELD
             title = (item.get('title') or item.get('name')).lower()
-            if any(x in title for x in ["cam", "hdcam", "ts"]):
-                self.signals.log_signal.emit(f"⚠️ CAM-SHIELD: Low quality detected for {title}.")
-            
+            if any(x in title for x in ["cam", "hdcam"]): self.signals.log_signal.emit(f"⚠️ CAM-SHIELD: Low quality rip alert: {title}")
             card = MovieCard(item, pix, mtype, self); self.grid.addWidget(card, (rank-1)//5, (rank-1)%5, alignment=Qt.AlignCenter)
-            if self.auto_pilot and rank == 1:
-                self.auto_pilot = False; self.initiate_watch_protocol(item, mtype)
+            if self.auto_pilot and rank == 1: self.auto_pilot = False; self.initiate_watch_protocol(item, mtype)
 
     def clear_gallery(self): 
         while self.grid.count():
@@ -227,9 +219,7 @@ class StarkCinemaSingularity(QMainWindow):
             h = {"Authorization": f"Bearer {STARK_TOKEN}"}
             res = requests.get(url, headers=h).json().get('results', [])
             for i, item in enumerate(res[:60]):
-                if t_id == self.task_counter:
-                    self.executor.submit(self.img_worker, item, i+1, self.current_mode, t_id)
-                    time.sleep(0.2)
+                if t_id == self.task_counter: self.executor.submit(self.img_worker, item, i+1, self.current_mode, t_id); time.sleep(0.2)
         except: pass
 
     def img_worker(self, item, rank, mtype, tid):
