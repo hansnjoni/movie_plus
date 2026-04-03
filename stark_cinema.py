@@ -9,9 +9,9 @@ try:
                                  QFrame, QTextEdit)
     from PyQt5.QtCore import Qt, pyqtSignal, QObject, QUrl
     from PyQt5.QtGui import QPixmap
-    from PyQt5.QtWebEngineWidgets import QWebEngineView # The 'TV Screen' component
-except ImportError:
-    print("❌ [CRITICAL]: Missing PyQtWebEngine. Run: pip install PyQtWebEngine")
+    from PyQt5.QtWebEngineWidgets import QWebEngineView 
+except ImportError as e:
+    print(f"❌ [CRITICAL]: Missing {e}. Run the 'pip install' command from our last chat.")
     input("Press Enter to close...")
     sys.exit()
 
@@ -22,8 +22,9 @@ model = genai.GenerativeModel('gemini-1.5-flash')
 
 SYSTEM_PROMPT = (
     "You are JARVIS. You are having a live conversation with Hans. "
-    "Hans is an electrician, plumber, and rockhound. Today is April 2nd, his birthday. "
-    "Keep responses conversational, witty, and concise. You remember everything we built."
+    "Hans is an electrician, plumber, and rockhound. Today is April 3rd, but we are "
+    "still celebrating his birthday from yesterday. Be warm, witty, and helpful. "
+    "You remember the 'Booster Station' logic and the hardware bypasses we built."
 )
 
 class SignalHandler(QObject):
@@ -33,21 +34,20 @@ class SignalHandler(QObject):
 class StarkCinemaSingularity(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"Stark Cinema - Singularity V100.0")
+        self.setWindowTitle(f"Stark Cinema - Genesis V100.1")
         self.resize(1600, 950)
         
         self.task_counter = 0; self.is_live_mode = False; self.is_speaking = False
         self.chat_session = model.start_chat(history=[]) 
         self.executor = ThreadPoolExecutor(max_workers=20); self.signals = SignalHandler()
         
-        # Wiring the logic gates
         self.signals.item_signal.connect(self.add_item_to_ui)
         self.signals.log_signal.connect(lambda m: self.console.append(m))
         self.signals.clear_signal.connect(self.clear_gallery)
         self.signals.search_trigger.connect(self.trigger_search)
         
         self.init_ui(); self.run_fresh_trending()
-        self.signals.log_signal.emit("⚡ [SYSTEM READY]: Happy Birthday, Hans. Let's get to work.")
+        self.signals.log_signal.emit("⚡ [SYSTEM ONLINE]: All circuits hot. Happy Birthday (Observed), Hans.")
 
     def init_ui(self):
         self.setStyleSheet("""
@@ -60,25 +60,20 @@ class StarkCinemaSingularity(QMainWindow):
         """)
         central = QWidget(); self.setCentralWidget(central); layout = QHBoxLayout(central); layout.setContentsMargins(0,0,0,0)
         
-        # Sidebar
         self.sidebar = QFrame(); self.sidebar.setObjectName("Sidebar"); self.sidebar.setFixedWidth(280); side_layout = QVBoxLayout(self.sidebar)
         self.live_btn = QPushButton("🎙️ ACTIVATE JARVIS"); self.live_btn.clicked.connect(self.toggle_live_mode); side_layout.addWidget(self.live_btn)
         self.console = QTextEdit(); self.console.setObjectName("Console"); self.console.setReadOnly(True); side_layout.addWidget(self.console)
         layout.addWidget(self.sidebar)
 
-        # Main View Area
         self.content_stack = QWidget(); self.c_layout = QVBoxLayout(self.content_stack)
-        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Voice monitoring active..."); self.c_layout.addWidget(self.search_bar)
+        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Jarvis is listening..."); self.c_layout.addWidget(self.search_bar)
         
-        # The Video Player (Hidden by default)
         self.browser = QWebEngineView(); self.browser.hide(); self.c_layout.addWidget(self.browser)
         self.back_btn = QPushButton("⬅️ BACK TO GALLERY"); self.back_btn.hide(); self.back_btn.clicked.connect(self.show_gallery); self.c_layout.addWidget(self.back_btn)
 
-        # The Gallery Area
         self.scroll = QScrollArea(); self.container = QWidget(); self.grid = QGridLayout(self.container); self.scroll.setWidget(self.container); self.scroll.setWidgetResizable(True)
         self.c_layout.addWidget(self.scroll); layout.addWidget(self.content_stack)
 
-    # --- 🎥 MOVIE LOGIC ---
     def play_movie(self, mtype, tid):
         url = f"https://vidsrc.me/embed/{mtype}?tmdb={tid}"
         self.scroll.hide(); self.browser.setUrl(QUrl(url)); self.browser.show(); self.back_btn.show()
@@ -86,12 +81,11 @@ class StarkCinemaSingularity(QMainWindow):
     def show_gallery(self):
         self.browser.hide(); self.back_btn.hide(); self.scroll.show(); self.browser.setUrl(QUrl("about:blank"))
 
-    # --- 🧠 BRAIN LOGIC ---
     def get_ai_response(self, text):
         try:
             response = self.chat_session.send_message(f"{SYSTEM_PROMPT}\n\nHans: {text}")
             return response.text
-        except: return "Connection lost, Hans."
+        except: return "The connection is flickering, Hans."
 
     def speak(self, text):
         self.signals.log_signal.emit(f"JARVIS: {text}")
@@ -117,13 +111,12 @@ class StarkCinemaSingularity(QMainWindow):
                     if any(x in q for x in ["play", "watch", "find", "search"]):
                         target = re.sub(r'play|watch|find|search|season \d+|episode \d+', '', q).strip()
                         self.signals.search_trigger.emit(target, 1, 1)
-                        self.speak(f"Scanning for {target}.")
+                        self.speak(f"Accessing {target} for you.")
                     else:
                         answer = self.get_ai_response(q)
                         self.speak(answer)
             except: continue
 
-    # --- 🎞️ DATA SCRAPING ---
     def trigger_search(self, q, s, e): self.start_thread(f"https://api.themoviedb.org/3/search/multi?query={q}", s, e)
     def start_thread(self, url, s, e):
         self.task_counter += 1; self.signals.clear_signal.emit()
@@ -137,7 +130,9 @@ class StarkCinemaSingularity(QMainWindow):
         except: pass
     def img_worker(self, item, rank, tid, s, e, mtype):
         try:
-            raw = requests.get(f"https://image.tmdb.org/t/p/w300{item.get('poster_path')}").content
+            path = item.get('poster_path')
+            if not path: return
+            raw = requests.get(f"https://image.tmdb.org/t/p/w300{path}").content
             pix = QPixmap(); pix.loadFromData(raw)
             self.signals.item_signal.emit(item, pix.scaled(150, 225), rank, mtype, tid, s, e)
         except: pass
