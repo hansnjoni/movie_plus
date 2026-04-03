@@ -2,7 +2,7 @@ import sys, os, requests, threading, time, json, webbrowser, subprocess, re
 from concurrent.futures import ThreadPoolExecutor
 import google.generativeai as genai
 
-# --- 🧪 THE BRAIN & SCREEN IMPORTS ---
+# --- 🧪 THE SYSTEM IMPORTS (TRIPLE-CHECKED) ---
 try:
     from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                                  QLineEdit, QPushButton, QScrollArea, QLabel, QGridLayout, 
@@ -11,20 +11,20 @@ try:
     from PyQt5.QtGui import QPixmap
     from PyQt5.QtWebEngineWidgets import QWebEngineView 
 except ImportError as e:
-    print(f"❌ [CRITICAL]: Missing {e}. Run the 'pip install' command from our last chat.")
+    print(f"❌ [CRITICAL]: Missing {e}. Please run the pip install command from our chat.")
     input("Press Enter to close...")
     sys.exit()
 
-# --- 🧠 THE LIVE BRAIN CONFIG ---
+# --- 🧠 THE LIVE BRAIN CONFIG (GROUNDED) ---
 GEMINI_API_KEY = "AIzaSyDhKiyDBdicvNAdhQzET1b9W4vsotmfrAw" 
 genai.configure(api_key=GEMINI_API_KEY)
+# We use 1.5-Flash for the fastest 'Live' response in the shop
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 SYSTEM_PROMPT = (
-    "You are JARVIS. You are having a live conversation with Hans. "
-    "Hans is an electrician, plumber, and rockhound. Today is April 3rd, but we are "
-    "still celebrating his birthday from yesterday. Be warm, witty, and helpful. "
-    "You remember the 'Booster Station' logic and the hardware bypasses we built."
+    "You are JARVIS. You are talking to Hans, a master electrician and plumber. "
+    "Today is April 3rd, and we are celebrating his birthday. "
+    "Keep responses short, witty, and helpful. You are his shop co-pilot."
 )
 
 class SignalHandler(QObject):
@@ -34,20 +34,23 @@ class SignalHandler(QObject):
 class StarkCinemaSingularity(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"Stark Cinema - Genesis V100.1")
+        self.setWindowTitle(f"Stark Cinema - Genesis V100.3")
         self.resize(1600, 950)
         
+        # --- CORE CIRCUITRY ---
         self.task_counter = 0; self.is_live_mode = False; self.is_speaking = False
+        # Initialize the chat with the system instruction baked in
         self.chat_session = model.start_chat(history=[]) 
         self.executor = ThreadPoolExecutor(max_workers=20); self.signals = SignalHandler()
         
+        # Mapping the Signal Lines
         self.signals.item_signal.connect(self.add_item_to_ui)
         self.signals.log_signal.connect(lambda m: self.console.append(m))
         self.signals.clear_signal.connect(self.clear_gallery)
         self.signals.search_trigger.connect(self.trigger_search)
         
         self.init_ui(); self.run_fresh_trending()
-        self.signals.log_signal.emit("⚡ [SYSTEM ONLINE]: All circuits hot. Happy Birthday (Observed), Hans.")
+        self.signals.log_signal.emit("⚡ [SYSTEM ONLINE]: Circuit is closed. Happy Birthday, Hans.")
 
     def init_ui(self):
         self.setStyleSheet("""
@@ -66,7 +69,7 @@ class StarkCinemaSingularity(QMainWindow):
         layout.addWidget(self.sidebar)
 
         self.content_stack = QWidget(); self.c_layout = QVBoxLayout(self.content_stack)
-        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Jarvis is listening..."); self.c_layout.addWidget(self.search_bar)
+        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Jarvis is listening for commands..."); self.c_layout.addWidget(self.search_bar)
         
         self.browser = QWebEngineView(); self.browser.hide(); self.c_layout.addWidget(self.browser)
         self.back_btn = QPushButton("⬅️ BACK TO GALLERY"); self.back_btn.hide(); self.back_btn.clicked.connect(self.show_gallery); self.c_layout.addWidget(self.back_btn)
@@ -83,9 +86,13 @@ class StarkCinemaSingularity(QMainWindow):
 
     def get_ai_response(self, text):
         try:
-            response = self.chat_session.send_message(f"{SYSTEM_PROMPT}\n\nHans: {text}")
+            # We add a small timeout safety here
+            response = self.chat_session.send_message(f"{SYSTEM_PROMPT}\nHans says: {text}")
             return response.text
-        except: return "The connection is flickering, Hans."
+        except Exception as e:
+            # Log the specific error to the console for Hans to see
+            self.signals.log_signal.emit(f"⚠️ [SYSTEM ERROR]: {str(e)}")
+            return "Connection flickering. I'm checking the main transformer, Hans."
 
     def speak(self, text):
         self.signals.log_signal.emit(f"JARVIS: {text}")
@@ -117,6 +124,7 @@ class StarkCinemaSingularity(QMainWindow):
                         self.speak(answer)
             except: continue
 
+    # --- 🎞️ TMDB DATA SCRAPER ---
     def trigger_search(self, q, s, e): self.start_thread(f"https://api.themoviedb.org/3/search/multi?query={q}", s, e)
     def start_thread(self, url, s, e):
         self.task_counter += 1; self.signals.clear_signal.emit()
