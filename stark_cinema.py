@@ -1,167 +1,125 @@
-import sys, os, requests, threading, time, json, webbrowser, subprocess, re
-from concurrent.futures import ThreadPoolExecutor
+import os, re, threading
+from kivy.app import App
+from kivy.uix.button import Button
+from kivy.uix.label import Label
+from kivy.uix.boxlayout import BoxLayout
+from kivy.core.window import Window
+from plyer import call # <-- The Native Android Telecom Relay
+import speech_recognition as sr
 import google.generativeai as genai
 
-# --- 🧪 THE SYSTEM IMPORTS (TRIPLE-CHECKED) ---
-try:
-    from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                                 QLineEdit, QPushButton, QScrollArea, QLabel, QGridLayout, 
-                                 QFrame, QTextEdit)
-    from PyQt5.QtCore import Qt, pyqtSignal, QObject, QUrl
-    from PyQt5.QtGui import QPixmap
-    from PyQt5.QtWebEngineWidgets import QWebEngineView 
-except ImportError as e:
-    print(f"❌ [CRITICAL]: Missing {e}. Please run the pip install command from our chat.")
-    input("Press Enter to close...")
-    sys.exit()
-
-# --- 🧠 THE LIVE BRAIN CONFIG (GROUNDED) ---
+# --- 🧠 THE TELECOM AI CONFIG ---
 GEMINI_API_KEY = "AIzaSyDhKiyDBdicvNAdhQzET1b9W4vsotmfrAw" 
 genai.configure(api_key=GEMINI_API_KEY)
-# We use 1.5-Flash for the fastest 'Live' response in the shop
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 SYSTEM_PROMPT = (
-    "You are JARVIS. You are talking to Hans, a master electrician and plumber. "
-    "Today is April 3rd, and we are celebrating his birthday. "
-    "Keep responses short, witty, and helpful. You are his shop co-pilot."
+    "You are JARVIS, a telecom control AI for Hans, a master electrician. "
+    "1. Answer general questions briefly (1 paragraph max). "
+    "2. If Hans asks to call someone, you MUST output this exact format: [CMD: CALL | Name] "
+    "Example: 'Patching you through now, Hans. [CMD: CALL | Landlord]' "
+    "Never speak the command tag out loud."
 )
 
-class SignalHandler(QObject):
-    item_signal = pyqtSignal(dict, QPixmap, int, str, int, int, int)
-    log_signal = pyqtSignal(str); clear_signal = pyqtSignal(); search_trigger = pyqtSignal(str, int, int)
-
-class StarkCinemaSingularity(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle(f"Stark Cinema - Genesis V100.3")
-        self.resize(1600, 950)
+class StarkTelecomApp(App):
+    def build(self):
+        # 🌑 Blackout Mobile UI
+        Window.clearcolor = (0.05, 0.05, 0.05, 1)
+        self.layout = BoxLayout(orientation='vertical', padding=20, spacing=20)
         
-        # --- CORE CIRCUITRY ---
-        self.task_counter = 0; self.is_live_mode = False; self.is_speaking = False
-        # Initialize the chat with the system instruction baked in
-        self.chat_session = model.start_chat(history=[]) 
-        self.executor = ThreadPoolExecutor(max_workers=20); self.signals = SignalHandler()
+        # --- 📖 THE MOBILE DIRECTORY ---
+        self.contacts = {
+            "little woman": "555-0101",
+            "dad": "555-0102",
+            "landlord": "555-0103",
+            "supply house": "555-0104"
+        }
+
+        self.chat_session = model.start_chat(history=[])
+
+        # UI Elements
+        self.status_label = Label(text="SYSTEM ONLINE", color=(0, 1, 0, 1), font_size='20sp', size_hint=(1, 0.2))
+        self.layout.add_widget(self.status_label)
+
+        self.mic_btn = Button(text="🎙️ PRESS TO COMMUNICATE", background_color=(0.5, 0, 0, 1), font_size='24sp', bold=True)
+        self.mic_btn.bind(on_press=self.start_listening_thread)
+        self.layout.add_widget(self.mic_btn)
+
+        return self.layout
+
+    def start_listening_thread(self, instance):
+        self.mic_btn.text = "🔴 LISTENING..."
+        self.mic_btn.background_color = (1, 0, 0, 1)
+        self.status_label.text = "Awaiting command..."
+        threading.Thread(target=self.listen_and_process, daemon=True).start()
+
+    def listen_and_process(self):
+        r = sr.Recognizer()
+        r.energy_threshold = 3500
         
-        # Mapping the Signal Lines
-        self.signals.item_signal.connect(self.add_item_to_ui)
-        self.signals.log_signal.connect(lambda m: self.console.append(m))
-        self.signals.clear_signal.connect(self.clear_gallery)
-        self.signals.search_trigger.connect(self.trigger_search)
-        
-        self.init_ui(); self.run_fresh_trending()
-        self.signals.log_signal.emit("⚡ [SYSTEM ONLINE]: Circuit is closed. Happy Birthday, Hans.")
-
-    def init_ui(self):
-        self.setStyleSheet("""
-            QMainWindow { background-color: #000; }
-            QFrame#Sidebar { background-color: #050505; border-right: 2px solid #FF0000; }
-            QLabel { color: #FF0000; font-family: 'Segoe UI'; font-weight: bold; }
-            QPushButton { background-color: #1a0000; color: #FF0000; border: 1px solid #FF0000; padding: 12px; }
-            QLineEdit { background-color: #111; color: #00FF00; border: 1px solid #FF0000; padding: 10px; }
-            QTextEdit#Console { background-color: #000; color: #00FF00; font-family: 'Consolas'; font-size: 10px; }
-        """)
-        central = QWidget(); self.setCentralWidget(central); layout = QHBoxLayout(central); layout.setContentsMargins(0,0,0,0)
-        
-        self.sidebar = QFrame(); self.sidebar.setObjectName("Sidebar"); self.sidebar.setFixedWidth(280); side_layout = QVBoxLayout(self.sidebar)
-        self.live_btn = QPushButton("🎙️ ACTIVATE JARVIS"); self.live_btn.clicked.connect(self.toggle_live_mode); side_layout.addWidget(self.live_btn)
-        self.console = QTextEdit(); self.console.setObjectName("Console"); self.console.setReadOnly(True); side_layout.addWidget(self.console)
-        layout.addWidget(self.sidebar)
-
-        self.content_stack = QWidget(); self.c_layout = QVBoxLayout(self.content_stack)
-        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("Jarvis is listening for commands..."); self.c_layout.addWidget(self.search_bar)
-        
-        self.browser = QWebEngineView(); self.browser.hide(); self.c_layout.addWidget(self.browser)
-        self.back_btn = QPushButton("⬅️ BACK TO GALLERY"); self.back_btn.hide(); self.back_btn.clicked.connect(self.show_gallery); self.c_layout.addWidget(self.back_btn)
-
-        self.scroll = QScrollArea(); self.container = QWidget(); self.grid = QGridLayout(self.container); self.scroll.setWidget(self.container); self.scroll.setWidgetResizable(True)
-        self.c_layout.addWidget(self.scroll); layout.addWidget(self.content_stack)
-
-    def play_movie(self, mtype, tid):
-        url = f"https://vidsrc.me/embed/{mtype}?tmdb={tid}"
-        self.scroll.hide(); self.browser.setUrl(QUrl(url)); self.browser.show(); self.back_btn.show()
-
-    def show_gallery(self):
-        self.browser.hide(); self.back_btn.hide(); self.scroll.show(); self.browser.setUrl(QUrl("about:blank"))
-
-    def get_ai_response(self, text):
         try:
-            # We add a small timeout safety here
-            response = self.chat_session.send_message(f"{SYSTEM_PROMPT}\nHans says: {text}")
-            return response.text
+            with sr.Microphone() as source:
+                audio = r.listen(source, timeout=5, phrase_time_limit=10)
+            
+            self.status_label.text = "Processing..."
+            query = r.recognize_google(audio).lower()
+            self.status_label.text = f"👤 You: {query}"
+            
+            # Send to Gemini
+            response = self.chat_session.send_message(f"{SYSTEM_PROMPT}\nHans says: {query}").text
+            self.execute_logic(response)
+
+        except sr.WaitTimeoutError:
+            self.reset_ui("Timeout. No speech detected.")
+        except sr.UnknownValueError:
+            self.reset_ui("Static on the line. Couldn't understand.")
         except Exception as e:
-            # Log the specific error to the console for Hans to see
-            self.signals.log_signal.emit(f"⚠️ [SYSTEM ERROR]: {str(e)}")
-            return "Connection flickering. I'm checking the main transformer, Hans."
+            self.reset_ui(f"Connection failed.")
 
-    def speak(self, text):
-        self.signals.log_signal.emit(f"JARVIS: {text}")
-        def run_speech():
-            self.is_speaking = True
-            clean_text = text.replace("'", "").replace('"', "")
-            subprocess.run(["powershell", "-WindowStyle", "Hidden", "-Command", 
-                          f"$s = New-Object -ComObject SAPI.SpVoice; $s.Priority = 2; $s.Speak('{clean_text}')"])
-            self.is_speaking = False
-        threading.Thread(target=run_speech, daemon=True).start()
+    def execute_logic(self, answer):
+        # Scan the AI's response for the telecom tag
+        cmd_match = re.search(r'\[CMD:\s*CALL\s*\|\s*(.*?)\]', answer, re.IGNORECASE)
+        
+        if cmd_match:
+            name_query = cmd_match.group(1).strip().lower()
+            spoken_answer = re.sub(r'\[CMD:.*?\]', '', answer, flags=re.IGNORECASE).strip()
+            
+            self.status_label.text = f"🤖 JARVIS: {spoken_answer}"
+            self.make_phone_call(name_query)
+        else:
+            self.status_label.text = f"🤖 JARVIS: {answer}"
+            
+        self.reset_ui_after_delay()
 
-    def live_voice_loop(self):
-        import speech_recognition as sr
-        r = sr.Recognizer(); r.energy_threshold = 3500; r.phrase_threshold = 0.4
-        while self.is_live_mode:
-            if self.is_speaking: time.sleep(0.1); continue
+    def make_phone_call(self, name_query):
+        contact_number = None
+        for name, number in self.contacts.items():
+            if name in name_query:
+                contact_number = number
+                break
+                
+        if contact_number:
+            self.status_label.text = f"📞 DIALING: {name_query.upper()}..."
             try:
-                with sr.Microphone() as src:
-                    audio = r.listen(src, timeout=None, phrase_time_limit=10)
-                    q = r.recognize_google(audio).lower()
-                    self.signals.log_signal.emit(f"HANS: {q}")
-                    
-                    if any(x in q for x in ["play", "watch", "find", "search"]):
-                        target = re.sub(r'play|watch|find|search|season \d+|episode \d+', '', q).strip()
-                        self.signals.search_trigger.emit(target, 1, 1)
-                        self.speak(f"Accessing {target} for you.")
-                    else:
-                        answer = self.get_ai_response(q)
-                        self.speak(answer)
-            except: continue
+                # The Android API Call to physically dial the radio
+                call.makecall(tel=contact_number)
+            except Exception as e:
+                self.status_label.text = "❌ Telecom permissions required."
+        else:
+            self.status_label.text = f"❌ Number not found for {name_query}."
+            
+        self.reset_ui_after_delay()
 
-    # --- 🎞️ TMDB DATA SCRAPER ---
-    def trigger_search(self, q, s, e): self.start_thread(f"https://api.themoviedb.org/3/search/multi?query={q}", s, e)
-    def start_thread(self, url, s, e):
-        self.task_counter += 1; self.signals.clear_signal.emit()
-        threading.Thread(target=self.fetch_worker, args=(url, self.task_counter, s, e), daemon=True).start()
-    def fetch_worker(self, url, t_id, s, e):
-        try:
-            h = {"Authorization": f"Bearer eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJlYjhlNjk5OGE0MGVhYmY0YmZjODg0NGI1YWJmNjM0OCIsIm5iZiI6MTc3MDk1NDE2NC40MjQsInN1YiI6IjY5OGU5ZGI0MTYxYmU0NzBjODJmMzBhYSIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.7vRC52l-A-wHieUWk65LelT8dLFYMD70kxas_p5qWu4"}
-            res = requests.get(url, headers=h).json().get('results', [])
-            for i, item in enumerate(res[:20]):
-                if t_id == self.task_counter: self.executor.submit(self.img_worker, item, i+1, t_id, s, e, item.get('media_type', 'movie'))
-        except: pass
-    def img_worker(self, item, rank, tid, s, e, mtype):
-        try:
-            path = item.get('poster_path')
-            if not path: return
-            raw = requests.get(f"https://image.tmdb.org/t/p/w300{path}").content
-            pix = QPixmap(); pix.loadFromData(raw)
-            self.signals.item_signal.emit(item, pix.scaled(150, 225), rank, mtype, tid, s, e)
-        except: pass
-    def add_item_to_ui(self, item, pix, rank, mtype, tid, s, e):
-        if tid == self.task_counter: card = MovieCard(item, pix, mtype, self); self.grid.addWidget(card, (rank-1)//5, (rank-1)%5)
-    def clear_gallery(self):
-        while self.grid.count():
-            child = self.grid.takeAt(0);
-            if child.widget(): child.widget().deleteLater()
-    def run_fresh_trending(self): self.start_thread(f"https://api.themoviedb.org/3/trending/all/day", 1, 1)
-    def toggle_live_mode(self):
-        self.is_live_mode = not self.is_live_mode
-        if self.is_live_mode: threading.Thread(target=self.live_voice_loop, daemon=True).start()
+    def reset_ui(self, msg):
+        self.status_label.text = msg
+        self.mic_btn.text = "🎙️ PRESS TO COMMUNICATE"
+        self.mic_btn.background_color = (0.5, 0, 0, 1)
 
-class MovieCard(QFrame):
-    def __init__(self, item, pix, mtype, app):
-        super().__init__(); self.setFixedSize(175, 330); self.app = app
-        self.setStyleSheet("QFrame { border: 1px solid #FF0000; background-color: #000; }")
-        layout = QVBoxLayout(self); lbl = QLabel(); lbl.setPixmap(pix); layout.addWidget(lbl)
-        t = (item.get('name') or item.get('title'))[:15]; layout.addWidget(QLabel(t))
-        btn = QPushButton("WATCH"); btn.clicked.connect(lambda: self.app.play_movie(mtype, item['id'])); layout.addWidget(btn)
+    def reset_ui_after_delay(self):
+        import time
+        time.sleep(3)
+        self.mic_btn.text = "🎙️ PRESS TO COMMUNICATE"
+        self.mic_btn.background_color = (0.5, 0, 0, 1)
 
-if __name__ == "__main__":
-    app = QApplication(sys.argv); win = StarkCinemaSingularity(); win.show(); sys.exit(app.exec_())
+if __name__ == '__main__':
+    StarkTelecomApp().run()
